@@ -149,15 +149,28 @@ npm run help
 npm run version
 ```
 
-### Configuration Options
+### Authentication & Configuration
 
-The Raspberry Pi component supports both JSON and JavaScript configuration files:
+The Raspberry Pi component supports secure authentication and flexible configuration:
 
-#### JSON Configuration (config.json)
+#### Credentials (credentials.json)
+```json
+{
+  "email": "your-email@domain.com",
+  "password": "your-password"
+}
+```
+⚠️ **Important**: This file is automatically excluded from Git and should never be committed.
+
+#### Configuration (config.json)
 ```json
 {
   "veoStreamUrl": "https://your-veo-stream.com",
   "port": 3000,
+  "login": {
+    "url": "https://live.veo.co/login",
+    "enabled": true
+  },
   "coordinates": {
     "fullscreen": { "x": 1765, "y": 1045 },
     "playback": { "x": 45, "y": 1052 },
@@ -169,6 +182,16 @@ The Raspberry Pi component supports both JSON and JavaScript configuration files
   }
 }
 ```
+
+#### Authentication Workflow
+1. **Credentials Check**: Looks for `credentials.json` in the raspberry-pi directory
+2. **Login Process**: If credentials exist and login is enabled:
+   - Navigates to the login URL (default: https://live.veo.co/login)
+   - Fills email and password fields
+   - Submits the login form
+   - Waits for successful authentication
+3. **Stream Navigation**: After authentication, navigates to the specified stream URL
+4. **Auto-Controls**: Automatically triggers fullscreen and playback using coordinates
 
 #### JavaScript Configuration (config.js)
 ```javascript

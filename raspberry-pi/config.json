@@ -3,6 +3,10 @@
   "port": 3000,
   "cloudUrl": "http://localhost:4000",
   "deviceId": "raspberry-pi-001",
+  "login": {
+    "url": "https://live.veo.co/login",
+    "enabled": true
+  },
   "viewport": {
     "width": 1920,
     "height": 1080

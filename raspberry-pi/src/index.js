@@ -25,6 +25,9 @@ class VeoDongleRaspberryPi {
     // Load configuration
     this.config = this.loadConfig();
 
+    // Load credentials if available
+    this.credentials = this.loadCredentials();
+
     // Override with command line arguments if provided
     this.streamUrl = process.argv[2] || this.config.veoStreamUrl || process.env.VEO_STREAM_URL || 'https://example.com/veo-stream';
     this.port = process.env.PORT || this.config.port || 3000;
@@ -89,6 +92,24 @@ class VeoDongleRaspberryPi {
         ]
       }
     };
+  }
+
+  loadCredentials() {
+    const credentialsPath = path.join(__dirname, '..', 'credentials.json');
+
+    try {
+      if (fs.existsSync(credentialsPath)) {
+        console.log('Loading credentials from credentials.json');
+        return JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
+      } else {
+        console.log('No credentials.json found - authentication disabled');
+        return null;
+      }
+    } catch (error) {
+      console.error('Failed to load credentials:', error.message);
+      console.log('Continuing without authentication...');
+      return null;
+    }
   }
 
   async initialize() {
@@ -187,24 +208,72 @@ class VeoDongleRaspberryPi {
     console.log('Chromium browser launched successfully');
   }
 
-  async navigateToStream() {
-    console.log(`Navigating to veo stream: ${this.streamUrl}`);
+  async loginToVeo() {
+    if (!this.credentials || !this.config.login || !this.config.login.enabled) {
+      console.log('Authentication not configured or disabled');
+      return;
+    }
 
     try {
+      console.log('🔐 Authenticating with Veo...');
+
+      const loginUrl = this.config.login.url || 'https://live.veo.co/login';
+
+      console.log('🌐 Navigating to login page...');
+      await this.page.goto(loginUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+
+      console.log('🔐 Filling login form...');
+
+      // Wait for and fill email field
+      await this.page.waitForSelector('input[type="email"]', { visible: true, timeout: 10000 });
+      await this.page.type('input[type="email"]', this.credentials.email, { delay: 50 });
+
+      // Wait for and fill password field
+      await this.page.waitForSelector('input[type="password"]', { visible: true, timeout: 10000 });
+      await this.page.type('input[type="password"]', this.credentials.password, { delay: 50 });
+
+      // Wait for and click submit button
+      await this.page.waitForSelector('button[type="submit"]', { visible: true, timeout: 10000 });
+      await this.page.click('button[type="submit"]');
+
+      // Wait for navigation after login
+      await this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 });
+
+      console.log('✅ Successfully authenticated with Veo');
+
+    } catch (error) {
+      console.error('❌ Login failed:', error.message);
+      throw new Error(`Authentication failed: ${error.message}`);
+    }
+  }
+
+  async navigateToStream() {
+    console.log(`🎯 Preparing to load veo stream: ${this.streamUrl}`);
+
+    try {
+      // Authenticate first if credentials are available
+      await this.loginToVeo();
+
+      // Navigate to the stream
+      console.log('🎬 Navigating to stream...');
       await this.page.goto(this.streamUrl, {
         waitUntil: 'networkidle2',
         timeout: 30000
       });
 
       // Wait for stream to load
-      await this.page.waitForTimeout(2000);
+      console.log('⏳ Waiting for stream to load...');
+      await this.page.waitForTimeout(3000);
 
       // Attempt to enter fullscreen automatically
       await this.enterFullscreen();
 
-      console.log('Successfully loaded veo stream');
+      // Trigger initial playback
+      await this.playStream();
+
+      console.log('✅ Successfully loaded and started veo stream');
     } catch (error) {
-      console.error('Error loading veo stream:', error);
+      console.error('❌ Error loading veo stream:', error.message);
       throw error;
     }
   }
@@ -215,7 +284,7 @@ class VeoDongleRaspberryPi {
       if (this.config.coordinates && this.config.coordinates.fullscreen) {
         const coords = this.config.coordinates.fullscreen;
         await this.page.mouse.click(coords.x, coords.y);
-        console.log(`Clicked fullscreen at coordinates (${coords.x}, ${coords.y})`);
+        console.log(`🖥️ Clicked fullscreen at coordinates (${coords.x}, ${coords.y})`);
       } else {
         // Fallback to JavaScript fullscreen API
         await this.page.evaluate(() => {
@@ -253,7 +322,7 @@ class VeoDongleRaspberryPi {
       if (this.config.coordinates && this.config.coordinates.playback) {
         const coords = this.config.coordinates.playback;
         await this.page.mouse.click(coords.x, coords.y);
-        console.log(`Clicked play at coordinates (${coords.x}, ${coords.y})`);
+        console.log(`▶️ Clicked play at coordinates (${coords.x}, ${coords.y})`);
       } else {
         // Fallback to HTML5 video API
         await this.page.evaluate(() => {
@@ -276,7 +345,7 @@ class VeoDongleRaspberryPi {
       if (this.config.coordinates && this.config.coordinates.playback) {
         const coords = this.config.coordinates.playback;
         await this.page.mouse.click(coords.x, coords.y);
-        console.log(`Clicked pause at coordinates (${coords.x}, ${coords.y})`);
+        console.log(`⏸️ Clicked pause at coordinates (${coords.x}, ${coords.y})`);
       } else {
         // Fallback to HTML5 video API
         await this.page.evaluate(() => {
