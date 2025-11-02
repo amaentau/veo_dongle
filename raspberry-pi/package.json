@@ -9,19 +9,38 @@
     "play": "node src/index.js",
     "help": "node src/index.js --help",
     "version": "node src/index.js --version",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "wsl": "./run.sh",
+    "wsl:dev": "./run.sh --dev",
+    "setup": "./setup.sh",
+    "setup:wsl": "./setup-wsl.sh",
+    "setup:rpi": "./setup-rpi.sh",
+    "install:deps": "npm install && npm audit fix",
+    "clean": "rm -rf node_modules && npm install",
+    "launch": "node launch-simple.js --system-chromium",
+    "launch:simple": "node src/simple-launcher.js",
+    "launch:headless": "node src/simple-launcher.js --headless",
+    "launch:gui": "node src/simple-launcher.js --no-gui=false",
+    "launch:system": "node src/simple-launcher.js --system-chromium",
+    "launch:test": "node src/simple-launcher.js --test"
   },
   "dependencies": {
-    "puppeteer": "^21.0.0",
-    "express": "^4.18.0",
-    "socket.io": "^4.7.0",
+    "@azure/data-tables": "^13.3.0",
     "cors": "^2.8.5",
-    "dotenv": "^16.3.0"
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "puppeteer": "^24.26.1",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
-    "nodemon": "^3.0.0"
+    "nodemon": "^3.1.7"
   },
-  "keywords": ["raspberry-pi", "chromium", "veo", "stream"],
+  "keywords": [
+    "raspberry-pi",
+    "chromium",
+    "veo",
+    "stream"
+  ],
   "author": "",
   "license": "MIT"
 }

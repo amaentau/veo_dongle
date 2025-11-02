@@ -128,3 +128,18 @@ ios/build/
 # Local configuration files
 config.js
 *.local
+raspberry-pi/config.json
+bb-functions/local.settings.json
+
+# Archives and binaries
+*.zip
+*.msi
+*.deb
+
+# Legacy/ignored directories
+archive/
+web/
+web-app/
+control/
+mobile/
+bb-functions/
