@@ -68,32 +68,50 @@ if [[ $NODE_VERSION -lt 20 ]]; then
     exit 1
 fi
 
-# Install Chromium browser
+# Install Chromium browser (robust across Debian/RPi OS variants)
 print_status "Installing Chromium browser..."
-if ! command -v chromium-browser &> /dev/null; then
-    $SUDO apt-get install -y chromium-browser
-    print_success "Chromium installed successfully"
+if ! command -v chromium-browser &> /dev/null && ! command -v chromium &> /dev/null; then
+    if $SUDO apt-get install -y chromium; then
+        print_success "Chromium installed successfully (package: chromium)"
+    elif $SUDO apt-get install -y chromium-browser; then
+        print_success "Chromium installed successfully (package: chromium-browser)"
+    else
+        print_error "Failed to install Chromium from apt"
+        exit 1
+    fi
 else
     print_success "Chromium is already installed"
 fi
 
-# Install additional dependencies for Puppeteer on Raspberry Pi
+# Normalize executable path for app code expecting google-chrome-stable
+CHROME_PATH=$(command -v chromium-browser || command -v chromium || true)
+if [[ -n "$CHROME_PATH" ]]; then
+    if [[ ! -x "/usr/bin/google-chrome-stable" ]]; then
+        print_status "Creating symlink /usr/bin/google-chrome-stable -> $CHROME_PATH"
+        $SUDO ln -sf "$CHROME_PATH" /usr/bin/google-chrome-stable
+        print_success "Symlink created"
+    else
+        print_status "google-chrome-stable already present"
+    fi
+else
+    print_warning "Chromium binary not found after install"
+fi
+
+# Install additional dependencies for Chromium/Puppeteer on Raspberry Pi
 print_status "Installing additional system dependencies..."
 $SUDO apt-get install -y \
     ca-certificates \
     fonts-liberation \
-    libappindicator3-1 \
     libasound2 \
     libatk-bridge2.0-0 \
     libatk1.0-0 \
     libatspi2.0-0 \
-    libc6 \
     libcairo-gobject2 \
     libcairo2 \
     libcups2 \
     libdbus-1-3 \
     libdrm2 \
-    libgcc1 \
+    libgbm1 \
     libglib2.0-0 \
     libgtk-3-0 \
     libnspr4 \
@@ -101,6 +119,8 @@ $SUDO apt-get install -y \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
     libstdc++6 \
+    libu2f-udev \
+    libvulkan1 \
     libx11-6 \
     libx11-xcb1 \
     libxcb1 \
@@ -112,6 +132,7 @@ $SUDO apt-get install -y \
     libxi6 \
     libxrandr2 \
     libxrender1 \
+    libxshmfence1 \
     libxss1 \
     libxtst6 \
     lsb-release \
@@ -129,36 +150,37 @@ else
     print_success "PM2 is already installed"
 fi
 
+# Resolve service run user (default to the invoking non-root user or 'pi')
+SERVICE_USER="${SUDO_USER:-$USER}"
+if [[ "$SERVICE_USER" == "root" || -z "$SERVICE_USER" ]]; then
+    SERVICE_USER="pi"
+fi
+SERVICE_UID=$(id -u "$SERVICE_USER" 2>/dev/null || echo 1000)
+
 # Create application directory structure
 print_status "Setting up application directory..."
 APP_DIR="/opt/veo-dongle"
-$SUDO mkdir -p $APP_DIR
-$SUDO cp -r . $APP_DIR/
-$SUDO chown -R $USER:$USER $APP_DIR
+$SUDO mkdir -p "$APP_DIR"
+$SUDO cp -a . "$APP_DIR"/
+$SUDO chown -R "$SERVICE_USER":"$SERVICE_USER" "$APP_DIR"
 
 # Navigate to application directory
 cd $APP_DIR
 
-# Install project dependencies
+# Install project dependencies (prefer lockfile for reproducibility)
 print_status "Installing project dependencies..."
-npm install --production
-
-# Fix security vulnerabilities
-print_status "Fixing security vulnerabilities..."
-npm audit fix
-
-# Create system user for the application (optional)
-print_status "Creating system user..."
-if ! id "veodongle" &>/dev/null; then
-    $SUDO useradd -r -s /bin/false veodongle
-    print_success "System user 'veodongle' created"
+if [[ -f package-lock.json ]]; then
+    npm ci --omit=dev
 else
-    print_success "System user 'veodongle' already exists"
+    npm install --production
 fi
 
-# Set proper ownership
-$SUDO chown -R veodongle:veodongle $APP_DIR
-print_success "Permissions set for system user"
+# Fix security vulnerabilities (non-fatal)
+print_status "Fixing security vulnerabilities (if any)..."
+npm audit fix || true
+
+# Using existing user for GUI session: $SERVICE_USER
+print_success "Service will run as user: $SERVICE_USER (uid=$SERVICE_UID)"
 
 # Create environment file
 if [[ ! -f .env ]]; then
@@ -225,10 +247,10 @@ Wants=network.target
 
 [Service]
 Type=simple
-User=veodongle
+User=$SERVICE_USER
 WorkingDirectory=$APP_DIR
 Environment=DISPLAY=:0
-Environment=XAUTHORITY=/home/veodongle/.X11/Xauthority
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$SERVICE_UID/bus
 ExecStart=/usr/bin/node $APP_DIR/src/index.js
 Restart=always
 RestartSec=10
