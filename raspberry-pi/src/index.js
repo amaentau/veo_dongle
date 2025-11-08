@@ -3,8 +3,6 @@
 const puppeteer = require('puppeteer');
 const express = require('express');
 const http = require('http');
-const socketIo = require('socket.io');
-const socketIoClient = require('socket.io-client');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
@@ -18,16 +16,8 @@ class VeoDongleRaspberryPi {
     this.page = null;
     this.app = express();
     this.server = http.createServer(this.app);
-    this.io = socketIo(this.server, {
-      cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-      }
-    });
 
-    // Cloud service connection (legacy Socket.IO)
-    this.cloudSocket = null;
-    this.cloudUrl = process.env.CLOUD_URL || 'http://localhost:4000';
+    
 
     // Azure-based cloud service
     this.cloudService = null;
@@ -53,6 +43,7 @@ class VeoDongleRaspberryPi {
     // Stream URL is always resolved from BBS; initialized as null until fetched
     this.streamUrl = null;
     this.port = process.env.PORT || this.config.port || 3000;
+    this.debug = process.env.DEBUG === 'true';
 
     // Coordinate-based control map (CSS pixel coordinates)
     // Keys are base widths; scaling uses current render width
@@ -116,14 +107,8 @@ class VeoDongleRaspberryPi {
     return {
       veoStreamUrl: 'https://example.com/veo-stream',
       port: 3000,
-      cloudUrl: 'http://localhost:4000',
       deviceId: 'raspberry-pi-001',
       viewport: { width: 1920, height: 1080 },
-      coordinates: {
-        click: { x: 100, y: 100 },
-        fullscreen: { x: 1765, y: 1045 },
-        playback: { x: 45, y: 1052 }
-      },
       chromium: {
         headless: false,
         args: [
@@ -174,106 +159,12 @@ class VeoDongleRaspberryPi {
           await this.updateStreamFromCloud(newStreamUrl, metadata);
         });
       } else {
-        console.log('⚠️ Azure Table Storage not enabled, checking for legacy Socket.IO...');
-
-        // Fallback to legacy Socket.IO (for backward compatibility)
-        if (this.cloudUrl && this.cloudUrl !== 'http://localhost:4000') {
-          await this.connectToLegacyCloud();
-        } else {
-          console.log('⚠️ No cloud service configured, running in standalone mode');
-        }
+        console.log('⚠️ No cloud service configured, running in standalone mode');
       }
 
       console.log('✅ Cloud services initialized');
     } catch (error) {
       console.error('❌ Error setting up cloud connection:', error.message);
-      console.log('⚠️ Continuing without cloud connection...');
-    }
-  }
-
-  async connectToLegacyCloud() {
-    console.log(`🔌 Connecting to legacy cloud service at ${this.cloudUrl}...`);
-
-    try {
-      this.cloudSocket = socketIoClient(this.cloudUrl, {
-        transports: ['websocket', 'polling'],
-      });
-
-      return new Promise((resolve, reject) => {
-        this.cloudSocket.on('connect', () => {
-          console.log('✅ Connected to legacy cloud service');
-
-          // Register this device with the cloud
-          const deviceInfo = {
-            id: this.deviceId,
-            name: 'Veo Dongle Raspberry Pi',
-            type: 'raspberry-pi',
-            status: 'connected',
-            port: this.port,
-            streamUrl: this.streamUrl
-          };
-
-          this.cloudSocket.emit('register', deviceInfo);
-          console.log(`📝 Registered device: ${deviceInfo.name} (${deviceInfo.id})`);
-
-          resolve();
-        });
-
-        this.cloudSocket.on('connect_error', (error) => {
-          console.error('❌ Failed to connect to legacy cloud service:', error.message);
-          console.log('⚠️ Continuing without cloud connection...');
-          resolve(); // Don't fail the startup if cloud is unavailable
-        });
-
-        this.cloudSocket.on('disconnect', () => {
-          console.log('📡 Disconnected from legacy cloud service');
-        });
-
-        // Handle commands from cloud service
-        this.cloudSocket.on('play', async () => {
-          try {
-            await this.playStream();
-            this.cloudSocket.emit('status', { action: 'play', success: true });
-          } catch (error) {
-            this.cloudSocket.emit('error', { action: 'play', message: error.message });
-          }
-        });
-
-        this.cloudSocket.on('pause', async () => {
-          try {
-            await this.pauseStream();
-            this.cloudSocket.emit('status', { action: 'pause', success: true });
-          } catch (error) {
-            this.cloudSocket.emit('error', { action: 'pause', message: error.message });
-          }
-        });
-
-        this.cloudSocket.on('fullscreen', async () => {
-          try {
-            await this.enterFullscreen();
-            this.cloudSocket.emit('status', { action: 'fullscreen', success: true });
-          } catch (error) {
-            this.cloudSocket.emit('error', { action: 'fullscreen', message: error.message });
-          }
-        });
-
-        // Handle stream URL updates from cloud
-        this.cloudSocket.on('stream', async (params) => {
-          try {
-            const { veoUrl } = params;
-            console.log(`🎯 Legacy cloud requested new stream: ${veoUrl}`);
-            await this.updateStreamFromCloud(veoUrl, { source: 'legacy-socket' });
-          } catch (error) {
-            console.error('❌ Error updating stream from legacy cloud:', error.message);
-            this.cloudSocket.emit('error', {
-              action: 'stream',
-              message: error.message
-            });
-          }
-        });
-      });
-    } catch (error) {
-      console.error('❌ Error setting up legacy cloud connection:', error.message);
       console.log('⚠️ Continuing without cloud connection...');
     }
   }
@@ -295,7 +186,7 @@ class VeoDongleRaspberryPi {
       this.streamUrl = newStreamUrl;
 
       // Navigate to the new stream
-      await this.navigateToStream();
+      await this.goToStream();
 
       console.log('✅ Stream updated successfully from cloud');
     } catch (error) {
@@ -415,17 +306,21 @@ class VeoDongleRaspberryPi {
         hasPage: !!this.page
       },
       cloud: {
-        azureService: this.cloudService ? this.cloudService.getStatus() : null,
-        legacySocket: {
-          connected: !!this.cloudSocket,
-          url: this.cloudUrl
-        }
+        azureService: this.cloudService ? this.cloudService.getStatus() : null
       }
     };
   }
 
   sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  logDebug(...args) {
+    if (this.debug) {
+      try {
+        console.log(...args);
+      } catch (_) {}
+    }
   }
 
   
@@ -460,18 +355,18 @@ class VeoDongleRaspberryPi {
 
     const scale = currentWidth / (ref.baseWidth || chosenWidth);
     const scaled = { x: Math.round(base.x * scale), y: Math.round(base.y * scale) };
-    console.log(`🎯 Using ${action} coords: baseWidth=${chosenWidth}, currentWidth=${currentWidth}, scale=${scale.toFixed(3)} → (${scaled.x}, ${scaled.y})`);
+    this.logDebug(`🎯 Using ${action} coords: baseWidth=${chosenWidth}, currentWidth=${currentWidth}, scale=${scale.toFixed(3)} → (${scaled.x}, ${scaled.y})`);
     return scaled;
   }
 
   async clickControl(action, label = '') {
     const coords = await this.resolveClickCoordinates(action);
-    console.log(`🟢 Preparing click '${action}' at (${coords.x}, ${coords.y}) in 250ms`);
+    this.logDebug(`🟢 Preparing click '${action}' at (${coords.x}, ${coords.y}) in 250ms`);
     await this.page.mouse.move(coords.x, coords.y);
     await this.showClickOverlay(coords.x, coords.y, label || action);
     await this.sleep(250);
     await this.page.mouse.click(coords.x, coords.y);
-    console.log(`🖱️ Clicked ${action} at (${coords.x}, ${coords.y})`);
+    this.logDebug(`🖱️ Clicked ${action} at (${coords.x}, ${coords.y})`);
   }
 
   async showClickOverlay(x, y, label = '') {
@@ -541,34 +436,6 @@ class VeoDongleRaspberryPi {
       res.json({ status: 'ok', timestamp: new Date().toISOString() });
     });
 
-    // Stream control endpoints
-    this.app.post('/control/play', async (req, res) => {
-      try {
-        await this.playStream();
-        res.json({ success: true, action: 'play' });
-      } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-      }
-    });
-
-    this.app.post('/control/pause', async (req, res) => {
-      try {
-        await this.pauseStream();
-        res.json({ success: true, action: 'pause' });
-      } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-      }
-    });
-
-    this.app.post('/control/fullscreen', async (req, res) => {
-      try {
-        await this.enterFullscreen();
-        res.json({ success: true, action: 'fullscreen' });
-      } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-      }
-    });
-
     // Cloud management endpoints
     this.setupCloudEndpoints();
   }
@@ -584,10 +451,6 @@ class VeoDongleRaspberryPi {
 
       res.json({
         cloud: status,
-        legacySocket: {
-          connected: !!this.cloudSocket,
-          url: this.cloudUrl
-        },
         currentStreamUrl: this.streamUrl,
         deviceId: this.deviceId
       });
@@ -747,19 +610,19 @@ class VeoDongleRaspberryPi {
       );
     }
 
-    console.log('🔧 Launch options:', launchOptions);
+    this.logDebug('🔧 Launch options:', launchOptions);
     this.browser = await puppeteer.launch(launchOptions);
 
     // Use initial page instead of creating new one
     const pages = await this.browser.pages();
-    console.log(`📄 Pages after launch: ${pages.length}`);
+    this.logDebug(`📄 Pages after launch: ${pages.length}`);
 
     if (pages.length > 0) {
       this.page = pages[0];
-      console.log('✅ Using initial page');
+      this.logDebug('✅ Using initial page');
     } else {
       this.page = await this.browser.newPage();
-      console.log('✅ Created new page');
+      this.logDebug('✅ Created new page');
     }
 
     await this.page.bringToFront();
@@ -777,7 +640,7 @@ class VeoDongleRaspberryPi {
         height: window.innerHeight,
         dpr: window.devicePixelRatio || 1
       }));
-      console.log(`🖥️ Content viewport: ${size.width}x${size.height} @${size.dpr}x DPR`);
+      this.logDebug(`🖥️ Content viewport: ${size.width}x${size.height} @${size.dpr}x DPR`);
     } catch (_) {}
 
     console.log('✅ Browser launched');
@@ -816,12 +679,12 @@ class VeoDongleRaspberryPi {
 
       if (forceFlag && chosen) {
         await this.page.setViewport(chosen);
-        console.log(`🖼️ Forced viewport to ${chosen.width}x${chosen.height} (preset: ${preset || 'explicit'})`);
+        this.logDebug(`🖼️ Forced viewport to ${chosen.width}x${chosen.height} (preset: ${preset || 'explicit'})`);
       } else {
-        console.log('🖼️ Using window-sized viewport (defaultViewport=null). Set FORCE_VIEWPORT=true to override.');
+        this.logDebug('🖼️ Using window-sized viewport (defaultViewport=null). Set FORCE_VIEWPORT=true to override.');
       }
     } catch (e) {
-      console.log('⚠️ Viewport setup skipped:', e.message);
+      this.logDebug('⚠️ Viewport setup skipped:', e.message);
     }
   }
 
@@ -829,7 +692,7 @@ class VeoDongleRaspberryPi {
     try {
       await this.enableClickCoordinateLogger();
     } catch (e) {
-      console.log('⚠️ Click logger setup skipped:', e.message);
+      this.logDebug('⚠️ Click logger setup skipped:', e.message);
     }
   }
 
@@ -841,9 +704,9 @@ class VeoDongleRaspberryPi {
         await this.page.exposeFunction('__veoReportClick', (payload) => {
           try {
             const { x, y, pageX, pageY, width, height, dpr, pctX, pctY, target, frameUrl } = payload || {};
-            console.log(`🖱️ Click @ (${x}, ${y}) [page:${pageX},${pageY}] on ${width}x${height} (DPR=${dpr}) → ${pctX}% x, ${pctY}% y | target=<${target?.tag || '?'} aria="${target?.aria || ''}"> frame=${frameUrl || 'main'}`);
+            (window).__veoReportClick || console.debug(`🖱️ Click @ (${x}, ${y}) [page:${pageX},${pageY}] on ${width}x${height} (DPR=${dpr}) → ${pctX}% x, ${pctY}% y | target=<${target?.tag || '?'} aria="${target?.aria || ''}"> frame=${frameUrl || 'main'}`);
           } catch (e) {
-            console.log('🖱️ Click payload error:', e.message);
+            console.debug('🖱️ Click payload error:', e.message);
           }
         });
       } catch (_) { /* already exposed */ }
@@ -911,23 +774,6 @@ class VeoDongleRaspberryPi {
       await this.sleep(200);
     }
     return false;
-  }
-
-  async sendPlayerKey(key) {
-    try {
-      await this.page.bringToFront();
-      await this.page.evaluate(() => {
-        try {
-          window.focus();
-          const cont = document.querySelector('.veo-player-container') || document.body || document.documentElement;
-          if (cont && cont.focus) cont.focus();
-        } catch {}
-      });
-      await this.page.keyboard.press(key);
-      console.log(`⌨️ Sent key: ${key}`);
-    } catch (e) {
-      console.log(`⚠️ Failed to send key '${key}': ${e.message}`);
-    }
   }
 
 
@@ -1053,7 +899,7 @@ class VeoDongleRaspberryPi {
       }
 
       // Find and fill login form fields
-      console.log('🔐 Filling login form fields...');
+      this.logDebug('🔐 Filling login form fields...');
 
       // Try email field with expanded selectors
       const emailSelectors = [
@@ -1070,7 +916,7 @@ class VeoDongleRaspberryPi {
           if (elements.length > 0) {
             await elements[0].type(this.credentials.email, { delay: 100 });
             emailFound = true;
-            console.log(`✅ Email field found and filled: ${sel}`);
+            this.logDebug(`✅ Email field found and filled: ${sel}`);
             break;
           }
         } catch (_) {}
@@ -1091,19 +937,19 @@ class VeoDongleRaspberryPi {
           if (elements.length > 0) {
             await elements[0].type(this.credentials.password, { delay: 100 });
             pwdFound = true;
-            console.log(`✅ Password field found and filled: ${sel}`);
+            this.logDebug(`✅ Password field found and filled: ${sel}`);
             break;
           }
         } catch (_) {}
       }
 
       if (!emailFound || !pwdFound) {
-        console.log('⚠️ Could not find both email and password fields');
+        this.logDebug('⚠️ Could not find both email and password fields');
         return;
       }
 
       // Click submit button with comprehensive search
-      console.log('🔘 Looking for submit button...');
+      this.logDebug('🔘 Looking for submit button...');
 
       let clicked = false;
 
@@ -1122,7 +968,7 @@ class VeoDongleRaspberryPi {
           if (elements.length > 0) {
             await elements[0].click();
             clicked = true;
-            console.log(`✅ Clicked submit button: ${sel}`);
+            this.logDebug(`✅ Clicked submit button: ${sel}`);
             break;
           }
         } catch (_) {}
@@ -1142,14 +988,14 @@ class VeoDongleRaspberryPi {
             return false;
           });
           if (formSubmitted) {
-            console.log('✅ Submitted form directly');
+            this.logDebug('✅ Submitted form directly');
             clicked = true;
           }
         } catch (_) {}
       }
 
       if (!clicked) {
-        console.log('⚠️ No submit button found, pressing Enter...');
+        this.logDebug('⚠️ No submit button found, pressing Enter...');
         await this.page.keyboard.press('Enter');
       }
 
@@ -1159,7 +1005,7 @@ class VeoDongleRaspberryPi {
         this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 5000 }).catch(() => {}),
         postSubmitWait
       ]);
-      console.log(`📍 After login attempt: ${this.page.url()}`);
+      this.logDebug(`📍 After login attempt: ${this.page.url()}`);
 
       // Check if we're still on a login page or if login succeeded
       const stillOnLogin = await this.page.evaluate(() => {
@@ -1169,9 +1015,9 @@ class VeoDongleRaspberryPi {
       });
 
       if (stillOnLogin) {
-        console.log('⚠️ Still on login page, login may have failed');
+        this.logDebug('⚠️ Still on login page, login may have failed');
       } else {
-        console.log('✅ Login appears successful - redirected away from login page');
+        this.logDebug('✅ Login appears successful - redirected away from login page');
       }
 
     } catch (error) {
@@ -1297,22 +1143,6 @@ class VeoDongleRaspberryPi {
     }
   }
 
-
-  async pauseStream() {
-    try {
-      if (await this.isLoginPage()) {
-        console.log('🔐 On login page; no need to pause');
-        return;
-      }
-      // Toggle via play button coordinates as pause control (most players use same spot)
-      await this.clickControl('play', 'pause');
-      console.log('Stream playback paused');
-    } catch (error) {
-      console.error('Error pausing stream:', error);
-      throw error;
-    }
-  }
-
   
 
   async start() {
@@ -1397,9 +1227,6 @@ Examples:
 
 API Endpoints:
   GET  /health           # Health check
-  POST /control/play     # Start playback
-  POST /control/pause    # Pause playback
-  POST /control/fullscreen # Toggle fullscreen
 
 Cloud API Endpoints:
   GET  /cloud/status     # Cloud service status
@@ -1411,9 +1238,6 @@ Cloud API Endpoints:
 Recovery Endpoints:
   GET  /recovery         # Recovery mode diagnostics
   POST /recovery/restart # Manual restart
-
-WebSocket Events (Legacy):
-  play, pause, fullscreen - Control commands
 `);
 }
 
