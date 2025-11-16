@@ -242,8 +242,99 @@ hdmi_group=1
 disable_overscan=1
 dtoverlay=vc4-kms-v3d
 gpu_mem=256
+
+# Boot optimizations for kiosk
+boot_delay=0
+initial_turbo=30
+disable_splash=1
 EOF
 }
+
+info "Optimizing cmdline.txt for faster boot"
+CMDLINE_FILE="/boot/cmdline.txt"
+if ! grep -q "fastboot" "$CMDLINE_FILE"; then
+  # Add fastboot and other optimizations to cmdline
+  sed -i 's/$/ fastboot quiet loglevel=2/' "$CMDLINE_FILE"
+  info "Added fastboot optimizations to cmdline.txt"
+fi
+
+optimize_boot_services() {
+  info "Disabling unnecessary services for kiosk mode"
+
+  # Services to disable for faster boot and reduced resource usage
+  local services_to_disable=(
+    "bluetooth.service"
+    "avahi-daemon.service"
+    "triggerhappy.service"
+    "raspi-config.service"
+    "keyboard-setup.service"
+    "dphys-swapfile.service"
+    "plymouth-start.service"
+    "plymouth-read-write.service"
+    "plymouth-quit.service"
+    "plymouth-quit-wait.service"
+    "systemd-ask-password-console.service"
+    "systemd-ask-password-wall.service"
+  )
+
+  for service in "${services_to_disable[@]}"; do
+    if systemctl is-enabled "$service" >/dev/null 2>&1; then
+      systemctl disable "$service" 2>/dev/null || true
+      info "Disabled $service"
+    fi
+  done
+
+  # Stop services that are running
+  for service in "${services_to_disable[@]}"; do
+    if systemctl is-active "$service" >/dev/null 2>&1; then
+      systemctl stop "$service" 2>/dev/null || true
+    fi
+  done
+
+  # Configure systemd journal for smaller size (kiosk doesn't need much history)
+  mkdir -p /etc/systemd/journald.conf.d
+  cat >/etc/systemd/journald.conf.d/01-kiosk.conf <<'EOF'
+[Journal]
+Storage=volatile
+RuntimeMaxUse=32M
+RuntimeMaxFileSize=8M
+EOF
+
+  # Configure systemd to skip fsck on boot for faster startup
+  systemctl mask systemd-fsck-root.service 2>/dev/null || true
+  systemctl mask systemd-fsck@.service 2>/dev/null || true
+
+  # Disable unnecessary kernel modules for faster boot
+  cat >/etc/modprobe.d/kiosk-blacklist.conf <<'EOF'
+# Disable unused kernel modules for kiosk
+blacklist snd_bcm2835
+blacklist vc_sm_cma
+blacklist bcm2835_v4l2
+blacklist bcm2835_codec
+blacklist bcm2835_isp
+blacklist bcm2835_mmal_vchiq
+blacklist bcm2835_unicam
+blacklist i2c_bcm2835
+blacklist spi_bcm2835
+blacklist i2c_dev
+blacklist spidev
+EOF
+
+  # Configure systemd for faster startup
+  mkdir -p /etc/systemd/system.conf.d
+  cat >/etc/systemd/system.conf.d/kiosk.conf <<'EOF'
+[Manager]
+# Reduce timeout for service startup
+DefaultTimeoutStartSec=10s
+DefaultTimeoutStopSec=10s
+# Reduce logging for faster boot
+LogLevel=warning
+EOF
+
+  info "Boot services optimized for kiosk mode"
+}
+
+optimize_boot_services
 
 info "Installing npm dependencies with Puppeteer using system Chromium"
 export PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1
@@ -256,8 +347,9 @@ info "Creating systemd unit ${SYSTEMD_UNIT}"
 cat >"${SYSTEMD_UNIT}" <<EOF
 [Unit]
 Description=Veo Dongle Kiosk (Xorg + Chromium)
-After=network-online.target
+After=network-online.target local-fs.target
 Wants=network-online.target
+Requires=local-fs.target
 
 [Service]
 User=${SERVICE_USER}
@@ -274,9 +366,12 @@ Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
+# Reduce memory usage for kiosk
+MemoryLimit=512M
+MemoryAccounting=yes
 
 [Install]
-WantedBy=graphical.target
+WantedBy=multi-user.target
 EOF
 
 info "Reloading systemd and enabling kiosk service"

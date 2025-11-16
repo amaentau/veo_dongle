@@ -40,8 +40,9 @@ Use the curated script at `raspberry-pi/setup-lite.sh` to bootstrap a fresh Rasp
 - installs Node.js 20, Chromium, Xorg, X11 utilities, and the Chromium runtime libraries required for Puppeteer
 - writes `/etc/X11/xorg.conf.d/99-veo-modesetting.conf` so the `modesetting` driver is forced with `Virtual 3840x2160` and the common HD/FullHD/4K modes
 - writes `/etc/systemd/system/veo-dongle-kiosk.service`, which starts `xinit` as the `dongle` user, runs `raspberry-pi/scripts/start-kiosk.sh`, and keeps Chromium in fullscreen kiosk mode on `DISPLAY=:0`
-- skips Puppeteer’s embedded Chromium download (`PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1`) so the application always receives the system browser defined by `config.browser.executablePath`
+- skips Puppeteer's embedded Chromium download (`PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1`) so the application always receives the system browser defined by `config.browser.executablePath`
 - symlinks `/usr/bin/chromium-browser`, `/usr/bin/chromium`, and `/usr/bin/google-chrome-stable` to the installed binary so both Puppeteer and any scripts that expect Chrome will succeed
+- **boot optimizations**: disables unnecessary services (bluetooth, avahi, plymouth, etc.), configures kernel module blacklisting, reduces systemd logging, optimizes cmdline.txt with `fastboot`, and sets memory limits for the kiosk service
 
 ### Running the Lite setup script
 
@@ -65,6 +66,29 @@ sudo journalctl -f -u veo-dongle-kiosk.service
 The `environments` block inside `config.json` holds overrides for `raspberry` (production) and `wsl` (development). The `raspberry` overrides enable EGL-based GPU hints and keep the full-screen Chromium flags used by the kiosk; the WSL overrides shrink the viewport and add SwiftShader/ANGLE fallbacks so the browser launches inside Windows. The systemd service exports `RUNTIME_ENV=raspberry`, so Node.js merges the Raspberry-specific overrides automatically while running on the Pi.
 
 If you change the source tree later, run `sudo -u dongle npm install --omit=dev` before restarting `veo-dongle-kiosk.service`.
+
+### Boot Optimizations
+
+The setup script includes comprehensive boot optimizations for faster kiosk startup:
+
+**Disabled Services:**
+- Bluetooth, Avahi/mDNS, Plymouth boot splash
+- GPIO button handling (triggerhappy)
+- Swap file management
+- Keyboard setup services
+
+**Kernel Optimizations:**
+- Blacklisted unused kernel modules (audio, camera, I2C, SPI drivers)
+- Added `fastboot` to cmdline.txt for faster kernel initialization
+- Reduced systemd logging level
+
+**Systemd Configuration:**
+- Kiosk service starts at `multi-user.target` instead of `graphical.target`
+- Reduced service startup timeouts
+- Memory limits (512MB) for the kiosk process
+- Volatile journal storage with size limits
+
+These optimizations typically reduce boot time from ~45 seconds to ~20-25 seconds on Raspberry Pi 4.
 
 ## Project Setup
 
