@@ -49,19 +49,24 @@ load_display_config() {
   DISPLAY_MODES=("${DEFAULT_DISPLAY_MODES[@]}")
   DISPLAY_PREFERRED="auto"
 
-  if [[ -f "${CONFIG_JSON}" ]] && command -v jq >/dev/null 2>&1; then
-    mapfile -t parsedModes < <(jq -r '.display.modes[]? | select(length > 0)' "${CONFIG_JSON}")
-    if [[ ${#parsedModes[@]} -gt 0 ]]; then
-      DISPLAY_MODES=("${parsedModes[@]}")
-    fi
+  if [[ -f "${CONFIG_JSON}" ]]; then
+    if command -v jq >/dev/null 2>&1; then
+      # Try to parse with jq
+      if mapfile -t parsedModes < <(jq -r '.display.modes[]? | select(length > 0)' "${CONFIG_JSON}" 2>/dev/null); then
+        if [[ ${#parsedModes[@]} -gt 0 ]]; then
+          DISPLAY_MODES=("${parsedModes[@]}")
+        fi
+      fi
 
-    local pref
-    pref="$(jq -r '.display.preferredMode // empty' "${CONFIG_JSON}")"
-    if [[ -n "${pref}" ]]; then
-      DISPLAY_PREFERRED="${pref}"
+      local pref
+      if pref="$(jq -r '.display.preferredMode // empty' "${CONFIG_JSON}" 2>/dev/null)" && [[ -n "${pref}" ]]; then
+        DISPLAY_PREFERRED="${pref}"
+      fi
+    else
+      warning "jq not available, unable to parse display settings from ${CONFIG_JSON}; using defaults"
     fi
   else
-    warning "Unable to parse display settings from ${CONFIG_JSON}; defaulting to ${DISPLAY_MODES[*]}"
+    warning "Config file ${CONFIG_JSON} not found; using default display settings"
   fi
 
   local highestW=0
@@ -132,6 +137,7 @@ apt-get install -y \
   curl \
   ca-certificates \
   gnupg \
+  lsb-release \
   xserver-xorg \
   xinit \
   x11-xserver-utils \
@@ -143,7 +149,41 @@ apt-get install -y \
   python3 \
   unzip \
   git
-  jq
+
+# Install jq separately as it may not be in default repos
+info "Installing jq for JSON parsing"
+if ! command -v jq >/dev/null 2>&1; then
+  # First try to add backports if we're on Debian/Raspbian
+  if grep -q "Raspbian\|Debian" /etc/os-release 2>/dev/null; then
+    # Enable backports for Bullseye/Bookworm
+    if grep -q "bullseye\|bookworm" /etc/os-release; then
+      echo "deb http://deb.debian.org/debian $(lsb_release -cs)-backports main" > /etc/apt/sources.list.d/backports.list
+      apt-get update
+    fi
+  fi
+
+  if apt-get install -y jq 2>/dev/null; then
+    info "jq installed successfully"
+  else
+    warning "jq not available in repos, downloading static binary"
+    # Download static ARM64 binary from a reliable source
+    if [[ "$(uname -m)" == "aarch64" ]]; then
+      # Use the official jq static binary for ARM64
+      curl -L -o /tmp/jq https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-arm64 && \
+      chmod +x /tmp/jq && \
+      mv /tmp/jq /usr/local/bin/jq && \
+      info "jq installed manually (ARM64)"
+    elif [[ "$(uname -m)" == "armv7l" ]]; then
+      # For 32-bit ARM
+      curl -L -o /tmp/jq https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-armhf && \
+      chmod +x /tmp/jq && \
+      mv /tmp/jq /usr/local/bin/jq && \
+      info "jq installed manually (ARM 32-bit)"
+    else
+      warning "Unsupported architecture $(uname -m) for jq installation. Display config will use defaults."
+    fi
+  fi
+fi
 
 info "Bootstrapping Node.js 20 (Nodesource)"
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -

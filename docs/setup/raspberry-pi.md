@@ -65,6 +65,8 @@ sudo journalctl -f -u veo-dongle-kiosk.service
 
 The `environments` block inside `config.json` holds overrides for `raspberry` (production) and `wsl` (development). The `raspberry` overrides enable EGL-based GPU hints and keep the full-screen Chromium flags used by the kiosk; the WSL overrides shrink the viewport and add SwiftShader/ANGLE fallbacks so the browser launches inside Windows. The systemd service exports `RUNTIME_ENV=raspberry`, so Node.js merges the Raspberry-specific overrides automatically while running on the Pi.
 
+The setup script automatically installs `jq` for JSON parsing (required for reading display configuration from `config.json`). If `jq` is not available in the default repositories, the script will attempt to install it from Debian backports or download a static binary for ARM64 architectures.
+
 If you change the source tree later, run `sudo -u dongle npm install --omit=dev` before restarting `veo-dongle-kiosk.service`.
 
 ### Boot Optimizations
