@@ -22,11 +22,17 @@ class VeoDongleRaspberryPi {
     // Azure-based cloud service
     this.cloudService = null;
 
-    // Device configuration
-    this.deviceId = process.env.DEVICE_ID || `raspberry-pi-${Date.now()}`;
+    // Runtime environment helpers
+    this.runtimeEnvironment = process.env.RUNTIME_ENV || (this.detectWSL() ? 'wsl' : 'raspberry');
 
     // Load configuration
-    this.config = this.loadConfig();
+    const baseConfig = this.loadConfig();
+    this.config = this.resolveEnvironmentConfig(baseConfig);
+    this.displayConfig = this.config.display || {};
+    this.logDisplaySummary();
+
+    // Device configuration (allow configuration file to drive the default ID)
+    this.deviceId = this.config.deviceId || process.env.DEVICE_ID || `raspberry-pi-${Date.now()}`;
 
     // Load credentials if available
     this.credentials = this.loadCredentials();
@@ -42,7 +48,7 @@ class VeoDongleRaspberryPi {
     // Override with command line arguments if provided
     // Stream URL is always resolved from BBS; initialized as null until fetched
     this.streamUrl = null;
-    this.port = process.env.PORT || this.config.port || 3000;
+    this.port = this.config.port || process.env.PORT || 3000;
     this.debug = process.env.DEBUG === 'true';
 
     // Coordinate-based control map (CSS pixel coordinates)
@@ -109,6 +115,10 @@ class VeoDongleRaspberryPi {
       port: 3000,
       deviceId: 'raspberry-pi-001',
       viewport: { width: 1920, height: 1080 },
+      display: {
+        modes: ['3840x2160', '1920x1080', '1280x720'],
+        preferredMode: 'auto'
+      },
       chromium: {
         headless: false,
         args: [
@@ -117,6 +127,41 @@ class VeoDongleRaspberryPi {
           '--start-fullscreen',
           '--kiosk'
         ]
+      }
+    };
+  }
+
+  resolveEnvironmentConfig(baseConfig = {}) {
+    const configObject = typeof baseConfig === 'object' && baseConfig ? baseConfig : {};
+    const { environments, ...rest } = configObject;
+    const envOverrides = (environments && typeof environments === 'object' && environments[this.runtimeEnvironment]) || {};
+
+    return {
+      ...rest,
+      ...envOverrides,
+      viewport: {
+        ...(rest.viewport || {}),
+        ...(envOverrides.viewport || {})
+      },
+      login: {
+        ...(rest.login || {}),
+        ...(envOverrides.login || {})
+      },
+      azure: {
+        ...(rest.azure || {}),
+        ...(envOverrides.azure || {})
+      },
+      browser: {
+        ...(rest.browser || {}),
+        ...(envOverrides.browser || {})
+      },
+      display: {
+        ...(rest.display || {}),
+        ...(envOverrides.display || {})
+      },
+      coordinates: {
+        ...(rest.coordinates || {}),
+        ...(envOverrides.coordinates || {})
       }
     };
   }
@@ -313,6 +358,14 @@ class VeoDongleRaspberryPi {
 
   sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  logDisplaySummary() {
+    const modes = Array.isArray(this.displayConfig.modes) && this.displayConfig.modes.length > 0
+      ? this.displayConfig.modes.join(', ')
+      : 'default';
+    const preferred = this.displayConfig.preferredMode || 'auto';
+    console.log(`🖥️ Display configuration: preferred=${preferred}; modes=${modes}`);
   }
 
   logDebug(...args) {
@@ -576,38 +629,71 @@ class VeoDongleRaspberryPi {
 
   async launchBrowser() {
     console.log('🚀 Launching Chromium...');
+    console.log(`Environment: ${this.runtimeEnvironment}`);
 
-    const isWSL = this.detectWSL();
-    console.log(`Environment: ${isWSL ? 'WSL' : 'Other'}`);
+    const browserConfig = this.config.browser || {};
+    const resolvedExecutable = this.locateChromiumExecutable(browserConfig.executablePath);
+    if (!resolvedExecutable) {
+      throw new Error('Chromium executable not found. Install Chromium or set config.browser.executablePath.');
+    }
 
-    // Use Puppeteer's bundled Chromium for better compatibility
-    const launchOptions = {
-      headless: false,
-	executablePath: '/usr/bin/google-chrome-stable',
-	ignoreDefaultArgs: ['--enable-automation'],
-      // Ensure page viewport matches the window (avoid Puppeteer's 800x600 default)
-      defaultViewport: null,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--ignore-certificate-errors',
-        '--autoplay-policy=no-user-gesture-required',
-        '--disable-infobars',
-        '--kiosk',
-        '--start-fullscreen'
-      ],
-      timeout: 30000
+    const collectArgs = [];
+    const seenArgs = new Set();
+    const pushArg = (arg) => {
+      if (!arg || seenArgs.has(arg)) return;
+      seenArgs.add(arg);
+      collectArgs.push(arg);
     };
 
-    if (isWSL) {
-      // WSL-specific options for better GPU compatibility
-      launchOptions.args.push(
-        '--use-gl=swiftshader',
-        '--use-angle=swiftshader',
-        '--ignore-gpu-blocklist'
-      );
+    const defaultChromiumArgs = [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--no-first-run',
+      '--no-zygote',
+      '--disable-infobars',
+      '--disable-web-security',
+      '--disable-accelerated-2d-canvas',
+      '--autoplay-policy=no-user-gesture-required',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+      '--disable-features=VizDisplayCompositor',
+      '--disable-extensions-http-throttling',
+      '--disable-ipc-flooding-protection',
+      '--ignore-certificate-errors',
+      '--kiosk',
+      '--start-fullscreen'
+    ];
+
+    defaultChromiumArgs.forEach(pushArg);
+
+    if (Array.isArray(browserConfig.args)) {
+      browserConfig.args.forEach(pushArg);
+    }
+    if (Array.isArray(browserConfig.extraArgs)) {
+      browserConfig.extraArgs.forEach(pushArg);
+    }
+
+    const launchOptions = {
+      headless: browserConfig.headless ?? false,
+      defaultViewport: browserConfig.defaultViewport ?? null,
+      executablePath: resolvedExecutable,
+      args: collectArgs,
+      timeout: browserConfig.timeout ?? 30000,
+      ignoreDefaultArgs: browserConfig.ignoreDefaultArgs ?? ['--enable-automation']
+    };
+
+    if (browserConfig.userDataDir) {
+      launchOptions.userDataDir = browserConfig.userDataDir;
+    }
+
+    if (browserConfig.env && typeof browserConfig.env === 'object') {
+      launchOptions.env = {
+        ...process.env,
+        ...browserConfig.env
+      };
     }
 
     this.logDebug('🔧 Launch options:', launchOptions);
@@ -686,6 +772,29 @@ class VeoDongleRaspberryPi {
     } catch (e) {
       this.logDebug('⚠️ Viewport setup skipped:', e.message);
     }
+  }
+
+  locateChromiumExecutable(explicitPath) {
+    const candidates = [
+      process.env.CHROMIUM_PATH,
+      explicitPath,
+      '/usr/bin/chromium-browser',
+      '/usr/bin/chromium',
+      '/usr/bin/google-chrome-stable',
+      '/snap/bin/chromium'
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+      try {
+        if (fs.existsSync(candidate)) {
+          return candidate;
+        }
+      } catch (_) {
+        // ignore invalid paths
+      }
+    }
+
+    return null;
   }
 
   async enableClickCoordinateLoggerSafe() {

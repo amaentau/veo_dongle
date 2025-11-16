@@ -32,6 +32,40 @@ sudo apt install -y chromium-browser
 sudo apt install -y libnss3-dev libatk-bridge2.0-dev libdrm2 libxkbcommon-dev libxss1 libasound2
 ```
 
+## Automated Raspberry Pi Lite Setup
+
+Use the curated script at `raspberry-pi/setup-lite.sh` to bootstrap a fresh Raspberry Pi OS Lite image with everything the `raspberry-pi` component needs. The script:
+
+- creates the `dongle` user, adds it to `video`, `render`, `input`, `dialout`, and `sudo`, and chowns the application tree
+- installs Node.js 20, Chromium, Xorg, X11 utilities, and the Chromium runtime libraries required for Puppeteer
+- writes `/etc/X11/xorg.conf.d/99-veo-modesetting.conf` so the `modesetting` driver is forced with `Virtual 3840x2160` and the common HD/FullHD/4K modes
+- writes `/etc/systemd/system/veo-dongle-kiosk.service`, which starts `xinit` as the `dongle` user, runs `raspberry-pi/scripts/start-kiosk.sh`, and keeps Chromium in fullscreen kiosk mode on `DISPLAY=:0`
+- skips Puppeteer’s embedded Chromium download (`PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1`) so the application always receives the system browser defined by `config.browser.executablePath`
+- symlinks `/usr/bin/chromium-browser`, `/usr/bin/chromium`, and `/usr/bin/google-chrome-stable` to the installed binary so both Puppeteer and any scripts that expect Chrome will succeed
+
+### Running the Lite setup script
+
+```bash
+sudo mkdir -p /home/dongle
+sudo git clone https://github.com/your-org/veo_dongle.git /home/dongle/veo_dongle
+cd /home/dongle/veo_dongle/raspberry-pi
+sudo ./setup-lite.sh
+```
+
+After the script completes the kiosk service is enabled automatically:
+
+```bash
+sudo journalctl -f -u veo-dongle-kiosk.service
+```
+
+### Configuration strategy for Raspberry vs WSL
+
+`setup-lite.sh` reads `raspberry-pi/config.json` so the same repository can drive both the kiosk deployment and WSL development environments. Edit the `display` block to list the HDMI modes that your monitor supports (`"3840x2160"`, `"1920x1080"`, and `"1280x720"` are all configured by default) and set `preferredMode` to `auto` or to a hard constraint if the display mis-reports its native resolution.
+
+The `environments` block inside `config.json` holds overrides for `raspberry` (production) and `wsl` (development). The `raspberry` overrides enable EGL-based GPU hints and keep the full-screen Chromium flags used by the kiosk; the WSL overrides shrink the viewport and add SwiftShader/ANGLE fallbacks so the browser launches inside Windows. The systemd service exports `RUNTIME_ENV=raspberry`, so Node.js merges the Raspberry-specific overrides automatically while running on the Pi.
+
+If you change the source tree later, run `sudo -u dongle npm install --omit=dev` before restarting `veo-dongle-kiosk.service`.
+
 ## Project Setup
 
 ### 1. Clone or Download the Project
