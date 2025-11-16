@@ -189,174 +189,24 @@ info "Bootstrapping Node.js 20 (Nodesource)"
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 apt-get install -y nodejs
 
-info "Installing Chromium from Raspberry Pi OS repositories"
-if apt-cache show chromium >/dev/null 2>&1; then
-  apt-get install -y chromium
-elif apt-cache show chromium-browser >/dev/null 2>&1; then
-  apt-get install -y chromium-browser
-else
-  warning "Chromium package not found in apt cache; install manually if needed."
+info "Installing Chromium browser"
+if ! apt-get install -y chromium; then
+  error "Failed to install Chromium via 'apt-get install chromium'. Please check your APT configuration."
+  exit 1
 fi
 
-info "Installing Chromium runtime dependencies"
-# Try to install packages, handling different naming conventions between OS versions
-PACKAGES=(
-  libnss3
-  libatk-bridge2.0-0
-  libatk1.0-0
-  libcups2
-  libdbus-1-3
-  libdrm2
-  libgbm1
-  libglib2.0-0
-  libgtk-3-0
-  libx11-6
-  libx11-xcb1
-  libxcomposite1
-  libxcursor1
-  libxdamage1
-  libxext6
-  libxfixes3
-  libxi6
-  libxrandr2
-  libxrender1
-  libxss1
-  libxtst6
-  libxkbcommon0
-  libasound2
-  libappindicator3-1
-  fontconfig
-  fonts-liberation
-  fonts-dejavu-core
-  libpango-1.0-0
-  libpangocairo-1.0-0
-  libsystemd0
-  libstdc++6
-)
-
-# Function to add package with alternatives
-add_package_with_alternatives() {
-  local primary="$1"
-  shift
-  local alternatives=("$@")
-
-  # Try primary package first
-  if apt-cache show "$primary" >/dev/null 2>&1; then
-    PACKAGES+=("$primary")
-    return 0
-  fi
-
-  # Try alternatives
-  for alt in "${alternatives[@]}"; do
-    if apt-cache show "$alt" >/dev/null 2>&1; then
-      PACKAGES+=("$alt")
-      info "Using alternative package: $alt (instead of $primary)"
-      return 0
-    fi
-  done
-
-  warning "No compatible package found for: $primary (tried: $primary ${alternatives[*]})"
-  return 1
-}
-
-# Try different variations of gdk-pixbuf package
-add_package_with_alternatives "libgdk-pixbuf2.0-0" "libgdk-pixbuf-2.0-0" "libgdk-pixbuf2.0" "libgdk-pixbuf-2.0"
-
-# Check other potentially problematic packages that may have naming differences across OS versions
-add_package_with_alternatives "libatk-bridge2.0-0" "libatk-bridge2.0"
-add_package_with_alternatives "libatk1.0-0" "libatk1.0"
-add_package_with_alternatives "libglib2.0-0" "libglib2.0"
-add_package_with_alternatives "libgtk-3-0" "libgtk-3"
-add_package_with_alternatives "libpango-1.0-0" "libpango-1.0"
-add_package_with_alternatives "libpangocairo-1.0-0" "libpangocairo-1.0"
-add_package_with_alternatives "libsystemd0" "libsystemd"
-add_package_with_alternatives "libxkbcommon0" "libxkbcommon"
-add_package_with_alternatives "libappindicator3-1" "libappindicator3"
-
-# Install all packages with error handling
-info "Installing ${#PACKAGES[@]} packages..."
-if apt-get install -y "${PACKAGES[@]}"; then
-  success "All packages installed successfully"
-else
-  # Try to identify which packages might have failed
-  warning "Some packages may have failed to install. Checking individual packages..."
-  FAILED_PACKAGES=()
-  for pkg in "${PACKAGES[@]}"; do
-    if ! dpkg -s "$pkg" >/dev/null 2>&1; then
-      FAILED_PACKAGES+=("$pkg")
-    fi
-  done
-
-  if [[ ${#FAILED_PACKAGES[@]} -gt 0 ]]; then
-    warning "The following packages failed to install: ${FAILED_PACKAGES[*]}"
-    warning "This may affect Chromium functionality. You can try:"
-    warning "  sudo apt-get update"
-    warning "  sudo apt-get install -f"
-    warning "  sudo apt-get install ${FAILED_PACKAGES[*]}"
-  else
-    warning "Package installation reported failure but all packages appear to be installed."
-  fi
-
-  warning "Continuing with setup, but Chromium may not work correctly."
+CHROMIUM_BIN="$(command -v chromium || true)"
+if [[ -z "${CHROMIUM_BIN}" ]]; then
+  error "Chromium binary not found in PATH after installation."
+  exit 1
 fi
 
-# Set up Chromium symlinks properly
-# Prefer 'chromium' as the canonical binary, with 'chromium-browser' as symlink
-setup_chromium_symlinks() {
-  local chromium_path=""
-  local chromium_browser_path=""
-
-  # Check what chromium binaries are available
-  if command -v chromium >/dev/null 2>&1; then
-    chromium_path="$(command -v chromium)"
-  fi
-
-  if command -v chromium-browser >/dev/null 2>&1; then
-    chromium_browser_path="$(command -v chromium-browser)"
-  fi
-
-  # If chromium exists, make chromium-browser a symlink to it
-  if [[ -n "${chromium_path}" ]]; then
-    if [[ "${chromium_browser_path}" != "${chromium_path}" ]]; then
-      info "Making chromium-browser a symlink to chromium"
-      ln -sf "${chromium_path}" /usr/bin/chromium-browser
-    fi
-    # chromium is already the canonical binary
-  elif [[ -n "${chromium_browser_path}" ]]; then
-    # chromium-browser exists but chromium doesn't - make chromium a symlink to chromium-browser
-    info "Making chromium a symlink to chromium-browser"
-    ln -sf "${chromium_browser_path}" /usr/bin/chromium
-  else
-    warning "No Chromium binary found. Please install chromium or chromium-browser."
-    return 1
-  fi
-
-  # Set up google-chrome-stable symlink (commonly expected by some applications)
-  local canonical_chromium=""
-  if command -v chromium >/dev/null 2>&1; then
-    canonical_chromium="$(command -v chromium)"
-  elif command -v chromium-browser >/dev/null 2>&1; then
-    canonical_chromium="$(command -v chromium-browser)"
-  fi
-
-  if [[ -n "${canonical_chromium}" ]]; then
-    ln -sf "${canonical_chromium}" /usr/bin/google-chrome-stable
-    info "Created google-chrome-stable symlink"
-  fi
-
-  return 0
-}
-
-if setup_chromium_symlinks; then
-  info "Chromium symlinks configured successfully"
-else
-  warning "Failed to configure Chromium symlinks"
-fi
+info "Using Chromium binary at ${CHROMIUM_BIN}"
 
 info "Configuring Xorg for modesetting displays"
 load_display_config
 mkdir -p /etc/X11/xorg.conf.d
-cat >/etc/X11/xorg.conf.d/99-veo-modesetting.conf <<'EOF'
+cat >/etc/X11/xorg.conf.d/99-veo-modesetting.conf <<EOF
 Section "Device"
   Identifier "VeoModesetting"
   Driver "modesetting"
@@ -382,11 +232,20 @@ Section "Screen"
 EndSection
 EOF
 
+info "Determining boot configuration directory (/boot vs /boot/firmware)"
+BOOT_DIR="/boot"
+if [[ -d "/boot/firmware" ]]; then
+  BOOT_DIR="/boot/firmware"
+fi
+BOOT_CONFIG="${BOOT_DIR}/config.txt"
+CMDLINE_FILE="${BOOT_DIR}/cmdline.txt"
+info "Using boot directory: ${BOOT_DIR}"
+
 info "Configuring boot options for an HDMI-first kiosk"
 {
-  grep -q '^hdmi_force_hotplug=1' /boot/config.txt && grep -q '^dtoverlay=vc4-kms-v3d' /boot/config.txt
+  grep -q '^hdmi_force_hotplug=1' "${BOOT_CONFIG}" && grep -q '^dtoverlay=vc4-kms-v3d' "${BOOT_CONFIG}"
 } || {
-  cat >>/boot/config.txt <<'EOF'
+  cat >>"${BOOT_CONFIG}" <<'EOF'
 hdmi_force_hotplug=1
 hdmi_group=1
 # Leave hdmi_mode unset so the display can negotiate the native resolution.
@@ -402,7 +261,6 @@ EOF
 }
 
 info "Optimizing cmdline.txt for faster boot"
-CMDLINE_FILE="/boot/cmdline.txt"
 if ! grep -q "fastboot" "$CMDLINE_FILE"; then
   # Add fastboot and other optimizations to cmdline
   sed -i 's/$/ fastboot quiet loglevel=2/' "$CMDLINE_FILE"
@@ -410,82 +268,7 @@ if ! grep -q "fastboot" "$CMDLINE_FILE"; then
 fi
 
 optimize_boot_services() {
-  info "Disabling unnecessary services for kiosk mode"
-
-  # Services to disable for faster boot and reduced resource usage
-  local services_to_disable=(
-    "bluetooth.service"
-    "avahi-daemon.service"
-    "triggerhappy.service"
-    "raspi-config.service"
-    "keyboard-setup.service"
-    "dphys-swapfile.service"
-    "plymouth-start.service"
-    "plymouth-read-write.service"
-    "plymouth-quit.service"
-    "plymouth-quit-wait.service"
-    "systemd-ask-password-console.service"
-    "systemd-ask-password-wall.service"
-  )
-
-  for service in "${services_to_disable[@]}"; do
-    if systemctl is-enabled "$service" >/dev/null 2>&1; then
-      systemctl disable "$service" 2>/dev/null || true
-      info "Disabled $service"
-    fi
-  done
-
-  # Stop services that are running
-  for service in "${services_to_disable[@]}"; do
-    if systemctl is-active "$service" >/dev/null 2>&1; then
-      systemctl stop "$service" 2>/dev/null || true
-    fi
-  done
-
-  # Configure systemd journal for smaller size (kiosk doesn't need much history)
-  mkdir -p /etc/systemd/journald.conf.d
-  cat >/etc/systemd/journald.conf.d/01-kiosk.conf <<'EOF'
-[Journal]
-Storage=volatile
-RuntimeMaxUse=32M
-RuntimeMaxFileSize=8M
-EOF
-
-  # Skip fsck on boot for faster startup by setting kernel parameters
-  # Instead of masking services (which can cause dependency issues), use boot options
-  if ! grep -q "fsck.mode=skip" /boot/cmdline.txt 2>/dev/null; then
-    info "Adding fsck skip to boot parameters for faster startup"
-    sed -i 's/$/ fsck.mode=skip/' /boot/cmdline.txt
-  fi
-
-  # Disable unnecessary kernel modules for faster boot
-  cat >/etc/modprobe.d/kiosk-blacklist.conf <<'EOF'
-# Disable unused kernel modules for kiosk
-blacklist snd_bcm2835
-blacklist vc_sm_cma
-blacklist bcm2835_v4l2
-blacklist bcm2835_codec
-blacklist bcm2835_isp
-blacklist bcm2835_mmal_vchiq
-blacklist bcm2835_unicam
-blacklist i2c_bcm2835
-blacklist spi_bcm2835
-blacklist i2c_dev
-blacklist spidev
-EOF
-
-  # Configure systemd for faster startup
-  mkdir -p /etc/systemd/system.conf.d
-  cat >/etc/systemd/system.conf.d/kiosk.conf <<'EOF'
-[Manager]
-# Reduce timeout for service startup
-DefaultTimeoutStartSec=10s
-DefaultTimeoutStopSec=10s
-# Reduce logging for faster boot
-LogLevel=warning
-EOF
-
-  info "Boot services optimized for kiosk mode"
+  info "Leaving system services, keyboard layout, and kernel modules unchanged (no kiosk-specific disabling)"
 }
 
 optimize_boot_services
@@ -514,7 +297,7 @@ Environment=DISPLAY=:0
 Environment=RUNTIME_ENV=raspberry
 Environment=PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1
 Environment=NODE_ENV=production
-Environment=CHROMIUM_PATH=${CHROMIUM_CANDIDATE:-/usr/bin/chromium-browser}
+  Environment=CHROMIUM_PATH=${CHROMIUM_BIN}
 Environment=XAUTHORITY=${SERVICE_HOME}/.Xauthority
 ExecStart=/usr/bin/xinit ${APP_ROOT}/scripts/start-kiosk.sh -- :0 -nolisten tcp vt7 -keeptty
 Restart=always
