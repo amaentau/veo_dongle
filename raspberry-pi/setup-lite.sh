@@ -183,7 +183,10 @@ apt-get install -y \
   mesa-utils \
   python3 \
   unzip \
-  git
+  git \
+  libgbm1 \
+  libasound2 \
+  matchbox-window-manager
 
 # Install jq separately as it may not be in default repos
 info "Installing jq for JSON parsing"
@@ -290,14 +293,14 @@ info "Using boot directory: ${BOOT_DIR}"
 
 info "Configuring boot options for an HDMI-first kiosk"
 {
-  grep -q '^hdmi_force_hotplug=1' "${BOOT_CONFIG}" && grep -q '^dtoverlay=vc4-fkms-v3d' "${BOOT_CONFIG}"
+  grep -q '^hdmi_force_hotplug=1' "${BOOT_CONFIG}" && grep -q '^dtoverlay=vc4-kms-v3d' "${BOOT_CONFIG}"
 } || {
   cat >>"${BOOT_CONFIG}" <<'EOF'
 hdmi_force_hotplug=1
 hdmi_group=1
 # Leave hdmi_mode unset so the display can negotiate the native resolution.
 disable_overscan=1
-dtoverlay=vc4-fkms-v3d
+dtoverlay=vc4-kms-v3d
 gpu_mem=256
 
 # Boot optimizations for kiosk
@@ -326,6 +329,27 @@ cd "${APP_ROOT}"
 sudo -u "${SERVICE_USER}" env PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1 npm install --omit=dev
 
 chmod +x "${APP_ROOT}/scripts/start-kiosk.sh"
+
+info "Creating .xinitrc for ${SERVICE_USER} to launch window manager and kiosk"
+cat >"${SERVICE_HOME}/.xinitrc" <<EOF
+#!/bin/sh
+# Disable DPMS (Display Power Management Signaling) and screen blanking
+xset -dpms
+xset s off
+xset s noblank
+
+# Start the window manager (required for proper fullscreen behavior)
+matchbox-window-manager -use_titlebar no &
+
+# Hide cursor when inactive
+unclutter -idle 0.1 -root &
+
+# Start the kiosk application
+exec ${APP_ROOT}/scripts/start-kiosk.sh
+EOF
+
+chown "${SERVICE_USER}:${SERVICE_USER}" "${SERVICE_HOME}/.xinitrc"
+chmod +x "${SERVICE_HOME}/.xinitrc"
 
 success "Setup complete! You can launch the kiosk manually via ${APP_ROOT}/scripts/start-kiosk.sh."
 
