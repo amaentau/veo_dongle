@@ -161,7 +161,8 @@ apt-get install -y \
   git \
   libgbm1 \
   libasound2 \
-  matchbox-window-manager
+  matchbox-window-manager \
+  xterm
 
 # Install jq separately as it may not be in default repos
 info "Installing jq for JSON parsing"
@@ -314,6 +315,19 @@ if ! grep -q "fastboot" "$CMDLINE_FILE"; then
   sed -i 's/$/ fastboot quiet loglevel=2/' "$CMDLINE_FILE"
   info "Added fastboot optimizations to cmdline.txt"
 fi
+
+# Ensure NetworkManager Wait Online is enabled for robust connectivity
+# (assuming NetworkManager is managing the connection, which is standard on modern RPi OS Lite)
+if systemctl list-unit-files | grep -q NetworkManager-wait-online.service; then
+  info "Enabling NetworkManager-wait-online.service to ensure network is ready before kiosk starts"
+  systemctl enable NetworkManager-wait-online.service || true
+elif systemctl list-unit-files | grep -q systemd-networkd-wait-online.service; then
+  info "Enabling systemd-networkd-wait-online.service"
+  systemctl enable systemd-networkd-wait-online.service || true
+else
+  warning "Could not find a network wait-online service. Network might not be ready immediately at boot."
+fi
+
 
 optimize_boot_services() {
   info "Leaving system services, keyboard layout, and kernel modules unchanged (no kiosk-specific disabling)"
