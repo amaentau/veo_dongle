@@ -12,6 +12,32 @@ export DISPLAY="${DISPLAY:-:0}"
 export XAUTHORITY="${HOME}/.Xauthority"
 export CHROMIUM_PATH="${CHROMIUM_PATH:-/usr/bin/chromium-browser}"
 
+wait_for_connectivity() {
+  local target_url="https://www.google.com/generate_204"
+  local attempts=0
+  local max_attempts=30
+  local delay=2
+
+  while (( attempts < max_attempts )); do
+    if curl -fsS --head "${target_url}" >/dev/null 2>&1; then
+      echo "[INFO] Network connectivity verified"
+      return 0
+    fi
+
+    attempts=$((attempts + 1))
+    echo "[INFO] Waiting for network connectivity (${attempts}/${max_attempts})"
+    sleep "${delay}"
+    if (( delay < 5 )); then
+      delay=$((delay + 1))
+    fi
+  done
+
+  echo "[WARNING] Network unreachable after ${max_attempts} attempts; proceeding anyway"
+  return 1
+}
+
+wait_for_connectivity
+
 cd "${APP_ROOT}"
 
 exec /usr/bin/env node src/index.js

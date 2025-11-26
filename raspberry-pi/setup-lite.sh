@@ -330,7 +330,28 @@ fi
 
 
 optimize_boot_services() {
-  info "Leaving system services, keyboard layout, and kernel modules unchanged (no kiosk-specific disabling)"
+  local services=(
+    bluetooth.service
+    hciuart.service
+    triggerhappy.service
+    ModemManager.service
+    anacron.service
+    cron.service
+    apt-daily.service
+    apt-daily-upgrade.service
+    apt-daily.timer
+    apt-daily-upgrade.timer
+  )
+
+  info "Disabling unnecessary services/timers to speed kiosk boot"
+  for svc in "${services[@]}"; do
+    if systemctl list-unit-files "${svc}" >/dev/null 2>&1; then
+      info "Masking and stopping ${svc}"
+      systemctl disable --now "${svc}" >/dev/null 2>&1 || true
+      systemctl mask "${svc}" >/dev/null 2>&1 || true
+    fi
+  done
+  systemctl daemon-reload >/dev/null 2>&1 || true
 }
 
 optimize_boot_services
@@ -376,8 +397,8 @@ fi
 cat >"${SERVICE_FILE}" <<EOF
 [Unit]
 Description=Veo Dongle Kiosk (Xorg)
-After=network-online.target
-Wants=network-online.target
+After=network.target
+Wants=network.target
 
 [Service]
 User=${SERVICE_USER}
