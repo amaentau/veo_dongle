@@ -31,17 +31,30 @@ class ProvisioningManager {
   async setupHotspot() {
     console.log('📡 Configuring Hotspot...');
 
-    // Ensure Wireless is unblocked
-    try { await execPromise('sudo rfkill unblock wifi'); } catch(_) {}
+    // 1. Check what is currently happening
+    try {
+        const { stdout: active } = await execPromise('nmcli -t -f NAME,DEVICE connection show --active');
+        console.log('   Current active connections:', active.trim() || 'None');
+    } catch (_) {}
 
-    // Clean up old connection
+    // 2. Force disconnect wlan0 to free it for AP mode
+    // WARNING: This will kill SSH if connected via WiFi!
+    console.log('   Disconnecting wlan0 to ensure clean state...');
+    try {
+        await execPromise('sudo nmcli device disconnect wlan0');
+        // Wait a moment for the disconnect to settle
+        await new Promise(resolve => setTimeout(resolve, 2000));
+    } catch (e) {
+        console.warn('   Disconnect warning (might already be disconnected):', e.message);
+    }
+
+    // 3. Clean up old connection
     try { 
-      console.log('   Removing old connection...');
+      console.log('   Removing old connection profile...');
       await execPromise(`sudo nmcli connection delete "${this.hotspotName}"`); 
     } catch(_) {}
 
-    // Create new connection (Open, Manual IP)
-    // We create with autoconnect=no first to ensure all settings are applied before activation
+    // 4. Create new connection (Open, Manual IP)
     console.log('   Creating connection profile...');
     
     try {
@@ -49,7 +62,7 @@ class ProvisioningManager {
         await execPromise(`sudo nmcli con add type wifi ifname wlan0 con-name "${this.hotspotName}" autoconnect no ssid "${this.ssid}"`);
         
         // Network settings (AP mode, Channel 1, Open Security)
-        // key-mgmt=none is critical for "secrets required" error
+        // key-mgmt=none is critical
         await execPromise(`sudo nmcli con modify "${this.hotspotName}" 802-11-wireless.mode ap 802-11-wireless.band bg 802-11-wireless.channel 1 wifi-sec.key-mgmt none`);
         
         // IP settings
@@ -71,6 +84,11 @@ class ProvisioningManager {
         try {
              const { stdout } = await execPromise('nmcli con show "' + this.hotspotName + '"');
              console.log('   Connection details:', stdout);
+        } catch (_) {}
+        
+        try {
+             const { stdout } = await execPromise('journalctl -n 20 --no-pager -u NetworkManager');
+             console.log('   NetworkManager Logs:', stdout);
         } catch (_) {}
         throw e;
     }
