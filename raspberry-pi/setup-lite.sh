@@ -173,7 +173,7 @@ if systemctl list-unit-files | grep -q dhcpcd; then
 fi
 
 # Allow nmcli without password for the service user (for provisioning)
-echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/nmcli, /usr/bin/systemctl, /usr/sbin/dnsmasq, /usr/bin/killall" > "/etc/sudoers.d/010_veo-dongle"
+echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/nmcli, /usr/bin/systemctl, /usr/sbin/dnsmasq, /usr/bin/killall, /usr/sbin/rfkill" > "/etc/sudoers.d/010_veo-dongle"
 chmod 0440 "/etc/sudoers.d/010_veo-dongle"
 
 

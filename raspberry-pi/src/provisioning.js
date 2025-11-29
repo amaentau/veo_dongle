@@ -71,6 +71,10 @@ class ProvisioningManager {
 
     console.log('   Activating hotspot...');
     try {
+      // Ensure Wireless is unblocked
+      await execPromise('sudo rfkill unblock wifi');
+      await execPromise('sudo nmcli radio wifi on');
+      
       await execPromise(`sudo nmcli con up "${this.hotspotName}"`);
       console.log('✅ Hotspot active');
     } catch (e) {
