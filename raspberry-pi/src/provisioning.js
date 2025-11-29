@@ -41,14 +41,30 @@ class ProvisioningManager {
 
   async setupHotspot() {
     console.log('📡 Configuring Hotspot (Open)...');
-    
+
+    // Check if wlan0 interface exists and is up
+    try {
+      await execPromise('ip link show wlan0');
+      console.log('   wlan0 interface found');
+    } catch (e) {
+      throw new Error('wlan0 interface not found. Please ensure WiFi hardware is available.');
+    }
+
+    // Ensure wlan0 is up
+    try {
+      await execPromise('sudo ip link set wlan0 up');
+      console.log('   wlan0 interface brought up');
+    } catch (e) {
+      console.warn('⚠️ Failed to bring up wlan0:', e.message);
+    }
+
     // Check if connection exists
     let exists = false;
     try {
       await execPromise(`nmcli connection show "${this.hotspotName}"`);
       exists = true;
       // Check if it is configured correctly (manual IP, no security)
-      // Ideally we delete and recreate to be sure, or check details. 
+      // Ideally we delete and recreate to be sure, or check details.
       // Simpler to recreate if we changed logic.
       console.log('   Hotspot connection profile exists. Recreating to ensure settings...');
       await execPromise(`sudo nmcli connection delete "${this.hotspotName}"`);
@@ -74,11 +90,16 @@ class ProvisioningManager {
       // Ensure Wireless is unblocked
       try { await execPromise('sudo rfkill unblock wifi'); } catch(_) {}
       try { await execPromise('sudo nmcli radio wifi on'); } catch(_) {}
-      
+
+      // Wait a moment for radio to be ready
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
       await execPromise(`sudo nmcli con up "${this.hotspotName}"`);
       console.log('✅ Hotspot active');
     } catch (e) {
       console.warn('⚠️ Failed to activate hotspot:', e.message.trim());
+      console.warn('   This may be due to wlan0 interface issues or hardware problems');
+      throw e; // Re-throw to prevent continuing
     }
   }
 

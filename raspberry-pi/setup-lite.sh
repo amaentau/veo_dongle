@@ -195,9 +195,34 @@ if [[ ! -f /etc/NetworkManager/conf.d/10-globally-managed-devices.conf ]]; then
     touch /etc/NetworkManager/conf.d/10-globally-managed-devices.conf
 fi
 
+# Ensure wlan0 interface is up and available
+info "Ensuring wlan0 interface is available"
+ip link set wlan0 up 2>/dev/null || true
+nmcli device set wlan0 managed yes 2>/dev/null || true
+
 # Allow nmcli without password for the service user (for provisioning)
 echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/nmcli, /usr/bin/systemctl, /usr/sbin/dnsmasq, /usr/bin/killall, /usr/sbin/rfkill" > "/etc/sudoers.d/010_veo-dongle"
 chmod 0440 "/etc/sudoers.d/010_veo-dongle"
+
+# Add debugging helper for wlan0 issues
+cat > "/usr/local/bin/debug-wlan0" << 'EOF'
+#!/bin/bash
+echo "=== wlan0 Interface Debug ==="
+ip link show wlan0 || echo "wlan0 not found"
+echo ""
+echo "=== NetworkManager Device Status ==="
+nmcli device show wlan0 || echo "wlan0 not managed by NM"
+echo ""
+echo "=== NetworkManager Connections ==="
+nmcli connection show
+echo ""
+echo "=== rfkill Status ==="
+rfkill list
+echo ""
+echo "=== NetworkManager Status ==="
+systemctl status NetworkManager --no-pager -l | head -20
+EOF
+chmod +x "/usr/local/bin/debug-wlan0"
 
 
 # Install jq separately as it may not be in default repos
@@ -363,6 +388,12 @@ elif systemctl list-unit-files | grep -q systemd-networkd-wait-online.service; t
 else
   warning "Could not find a network wait-online service. Network might not be ready immediately at boot."
 fi
+
+# Ensure NetworkManager is running and ready
+info "Ensuring NetworkManager is running"
+systemctl enable NetworkManager
+systemctl start NetworkManager
+sleep 2
 
 
 optimize_boot_services() {
