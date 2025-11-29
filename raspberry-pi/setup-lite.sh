@@ -178,6 +178,23 @@ if systemctl list-unit-files | grep -q dhcpcd; then
   systemctl disable --now dhcpcd >/dev/null 2>&1 || true
 fi
 
+# Ensure NetworkManager manages all interfaces by disabling ifupdown (interfaces file)
+if [[ -f /etc/network/interfaces ]]; then
+  if grep -q "wlan0" /etc/network/interfaces; then
+    info "Commenting out wlan0 in /etc/network/interfaces so NetworkManager can manage it"
+    sed -i 's/^\(allow-hotplug wlan0\)/#\1/' /etc/network/interfaces
+    sed -i 's/^\(iface wlan0\)/#\1/' /etc/network/interfaces
+  fi
+fi
+
+# Create NetworkManager config to allow it to manage everything
+mkdir -p /etc/NetworkManager/conf.d
+if [[ ! -f /etc/NetworkManager/conf.d/10-globally-managed-devices.conf ]]; then
+    info "Configuring NetworkManager to manage all devices"
+    # An empty file here overrides the default in /usr/lib which might ignore some devices
+    touch /etc/NetworkManager/conf.d/10-globally-managed-devices.conf
+fi
+
 # Allow nmcli without password for the service user (for provisioning)
 echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/nmcli, /usr/bin/systemctl, /usr/sbin/dnsmasq, /usr/bin/killall, /usr/sbin/rfkill" > "/etc/sudoers.d/010_veo-dongle"
 chmod 0440 "/etc/sudoers.d/010_veo-dongle"

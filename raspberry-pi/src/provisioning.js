@@ -62,7 +62,7 @@ class ProvisioningManager {
       // Create with manual IP to avoid conflict with default shared mode (which runs its own dnsmasq)
       // We want to run our own dnsmasq for Captive Portal DNS spoofing.
       await execPromise(`sudo nmcli con add type wifi ifname wlan0 con-name "${this.hotspotName}" autoconnect yes ssid "${this.ssid}"`);
-      await execPromise(`sudo nmcli con modify "${this.hotspotName}" 802-11-wireless.mode ap 802-11-wireless.band bg`);
+      await execPromise(`sudo nmcli con modify "${this.hotspotName}" 802-11-wireless.mode ap 802-11-wireless.band bg 802-11-wireless.channel 1`);
       // Set manual IP (do not set gateway as it causes issues when self-hosting)
       await execPromise(`sudo nmcli con modify "${this.hotspotName}" ipv4.method manual ipv4.addresses ${this.ipAddress}/24`);
       // No security (Open)
