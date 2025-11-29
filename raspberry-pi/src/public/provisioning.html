@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Veo Dongle Setup</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 400px;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 1.5rem;
+        }
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: #555;
+            font-weight: 500;
+        }
+        input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 1rem;
+            box-sizing: border-box;
+        }
+        button {
+            width: 100%;
+            padding: 1rem;
+            background-color: #2ecc71;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background-color: #27ae60;
+        }
+        .section-title {
+            margin-top: 1.5rem;
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+            color: #333;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 0.5rem;
+        }
+        .optional {
+            font-size: 0.8rem;
+            color: #888;
+            font-weight: normal;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Veo Dongle Setup</h1>
+        <form id="setupForm">
+            <div class="form-group">
+                <label for="email">Email</label>
+                <input type="email" id="email" name="email" required placeholder="user@example.com">
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required placeholder="********">
+            </div>
+            <div class="form-group">
+                <label for="deviceId">Device ID</label>
+                <input type="text" id="deviceId" name="deviceId" required placeholder="e.g. field-1-cam">
+            </div>
+
+            <div class="section-title">WiFi Configuration <span class="optional">(Optional)</span></div>
+            <div class="form-group">
+                <label for="wifiSsid">WiFi SSID</label>
+                <input type="text" id="wifiSsid" name="wifiSsid" placeholder="Network Name">
+            </div>
+            <div class="form-group">
+                <label for="wifiPassword">WiFi Password</label>
+                <input type="password" id="wifiPassword" name="wifiPassword" placeholder="Network Password">
+            </div>
+
+            <div class="section-title">Display Settings <span class="optional">(Optional)</span></div>
+            <div class="form-group">
+                <label for="playX">Play Button X</label>
+                <input type="number" id="playX" name="playX" placeholder="Default">
+            </div>
+            <div class="form-group">
+                <label for="playY">Play Button Y</label>
+                <input type="number" id="playY" name="playY" placeholder="Default">
+            </div>
+            <div class="form-group">
+                <label for="fullscreenX">Fullscreen X</label>
+                <input type="number" id="fullscreenX" name="fullscreenX" placeholder="Default">
+            </div>
+            <div class="form-group">
+                <label for="fullscreenY">Fullscreen Y</label>
+                <input type="number" id="fullscreenY" name="fullscreenY" placeholder="Default">
+            </div>
+
+            <div class="section-title">BBS Settings <span class="optional">(Optional)</span></div>
+            <div class="form-group">
+                <label for="bbsUrl">BBS URL</label>
+                <input type="url" id="bbsUrl" name="bbsUrl" placeholder="https://...">
+            </div>
+
+            <button type="submit" id="submitBtn">Save & Restart</button>
+        </form>
+    </div>
+
+    <script>
+        document.getElementById('setupForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('submitBtn');
+            btn.disabled = true;
+            btn.textContent = 'Saving...';
+
+            const formData = new FormData(e.target);
+            const data = Object.fromEntries(formData.entries());
+
+            // Convert number strings to numbers
+            ['playX', 'playY', 'fullscreenX', 'fullscreenY'].forEach(k => {
+                if (data[k]) data[k] = parseInt(data[k], 10);
+            });
+
+            try {
+                const res = await fetch('/provisioning/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                
+                if (res.ok) {
+                    btn.textContent = 'Saved! Device restarting...';
+                    setTimeout(() => {
+                        alert('Configuration saved. The device will now restart and connect to WiFi.');
+                    }, 500);
+                } else {
+                    throw new Error('Save failed');
+                }
+            } catch (err) {
+                btn.textContent = 'Error - Try Again';
+                btn.disabled = false;
+                alert('Failed to save configuration: ' + err.message);
+            }
+        });
+    </script>
+</body>
+</html>
