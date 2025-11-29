@@ -10,283 +10,136 @@ class ProvisioningManager {
     this.port = port || 3000;
     this.hotspotName = 'VeoHotspot';
     this.ssid = 'VeoSetup';
-    // No password for simplified setup
     this.ipAddress = '10.42.0.1';
-    this.subnetMask = '255.255.255.0';
   }
 
   async start() {
-    console.log('🚀 Starting Provisioning Mode...');
+    console.log('🚀 Starting Provisioning Mode (Simplified)...');
     
-    // 1. Setup Hotspot
     try {
       await this.setupHotspot();
+      await this.startDnsmasq();
+      this.setupRoutes();
+      console.log(`✅ Provisioning ready. Connect to "${this.ssid}" and go to http://${this.ipAddress}:${this.port}`);
     } catch (e) {
-      console.error('⚠️ Failed to setup hotspot:', e.message);
-      console.log('Continuing hoping for existing connection...');
+      console.error('❌ Provisioning setup failed:', e);
+      // Do not exit, so we can inspect the state
     }
-
-    // 2. Start Captive Portal Services (DNS/DHCP via dnsmasq)
-    try {
-        await this.startCaptivePortalServices();
-    } catch (e) {
-        console.error('⚠️ Failed to start captive portal services:', e.message);
-    }
-
-    // 3. Setup Routes
-    this.setupRoutes();
-
-    console.log(`✅ Provisioning server ready. Connect to WiFi "${this.ssid}" (No Password) and wait for the sign-in page.`);
   }
 
   async setupHotspot() {
-    console.log('📡 Configuring Hotspot (Open)...');
+    console.log('📡 Configuring Hotspot...');
 
-    // First unblock any rfkill blocks
-    try {
-      await execPromise('sudo rfkill unblock wifi');
-      console.log('   WiFi rfkill unblocked');
-    } catch (e) {
-      console.warn('⚠️ Failed to unblock rfkill:', e.message);
-    }
+    // Ensure Wireless is unblocked
+    try { await execPromise('sudo rfkill unblock wifi'); } catch(_) {}
 
-    // Wait for wlan0 interface to be available
-    console.log('   Waiting for wlan0 interface...');
-    let wlan0Found = false;
-    for (let i = 1; i <= 15; i++) {
-      try {
-        await execPromise('ip link show wlan0');
-        console.log(`   wlan0 interface found (after ${i} attempts)`);
-        wlan0Found = true;
-        break;
-      } catch (e) {
-        console.log(`   wlan0 not ready yet... (${i}/15)`);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-    }
+    // Clean up old connection
+    try { await execPromise(`sudo nmcli connection delete "${this.hotspotName}"`); } catch(_) {}
 
-    if (!wlan0Found) {
-      throw new Error('wlan0 interface not found after 15 seconds. Please ensure WiFi hardware is available and not blocked.');
-    }
+    // Create new connection (Open, Manual IP)
+    // ipv4.gateway is deliberately omitted to prevent clients from thinking there is internet
+    console.log('   Creating connection profile...');
+    await execPromise(`sudo nmcli con add type wifi ifname wlan0 con-name "${this.hotspotName}" autoconnect yes ssid "${this.ssid}"`);
+    await execPromise(`sudo nmcli con modify "${this.hotspotName}" 802-11-wireless.mode ap 802-11-wireless.band bg 802-11-wireless.channel 1`);
+    await execPromise(`sudo nmcli con modify "${this.hotspotName}" ipv4.method manual ipv4.addresses ${this.ipAddress}/24`);
+    await execPromise(`sudo nmcli con modify "${this.hotspotName}" wifi-sec.key-mgmt none`);
 
-    // Ensure wlan0 is up with retry logic
-    let wlan0Up = false;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        await execPromise('sudo ip link set wlan0 up');
-        // Verify it's actually up
-        const result = await execPromise('ip link show wlan0');
-        if (result.includes('UP')) {
-          console.log(`   wlan0 interface brought up (attempt ${attempt})`);
-          wlan0Up = true;
-          break;
-        } else {
-          throw new Error('Interface not showing as UP');
-        }
-      } catch (e) {
-        console.warn(`⚠️ Failed to bring up wlan0 (attempt ${attempt}):`, e.message);
-        if (attempt < 3) {
-          console.log('   Retrying in 2 seconds...');
-          await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-      }
-    }
-
-    if (!wlan0Up) {
-      throw new Error('Failed to bring wlan0 interface up after 3 attempts. Check hardware and rfkill status.');
-    }
-
-    // Check if connection exists
-    let exists = false;
-    try {
-      await execPromise(`nmcli connection show "${this.hotspotName}"`);
-      exists = true;
-      // Check if it is configured correctly (manual IP, no security)
-      // Ideally we delete and recreate to be sure, or check details.
-      // Simpler to recreate if we changed logic.
-      console.log('   Hotspot connection profile exists. Recreating to ensure settings...');
-      await execPromise(`sudo nmcli connection delete "${this.hotspotName}"`);
-      exists = false;
-    } catch (e) {
-      // Doesn't exist
-    }
-
-    if (!exists) {
-      console.log('   Creating hotspot connection profile...');
-      // Create with manual IP to avoid conflict with default shared mode (which runs its own dnsmasq)
-      // We want to run our own dnsmasq for Captive Portal DNS spoofing.
-      await execPromise(`sudo nmcli con add type wifi ifname wlan0 con-name "${this.hotspotName}" autoconnect yes ssid "${this.ssid}"`);
-      await execPromise(`sudo nmcli con modify "${this.hotspotName}" 802-11-wireless.mode ap 802-11-wireless.band bg 802-11-wireless.channel 1`);
-      // Set manual IP (do not set gateway as it causes issues when self-hosting)
-      await execPromise(`sudo nmcli con modify "${this.hotspotName}" ipv4.method manual ipv4.addresses ${this.ipAddress}/24`);
-      // No security (Open)
-      await execPromise(`sudo nmcli con modify "${this.hotspotName}" wifi-sec.key-mgmt none`);
-    }
-
+    // Bring up
     console.log('   Activating hotspot...');
-    try {
-      // Ensure Wireless is unblocked
-      try { await execPromise('sudo rfkill unblock wifi'); } catch(_) {}
-      try { await execPromise('sudo nmcli radio wifi on'); } catch(_) {}
-
-      // Wait a moment for radio to be ready
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      await execPromise(`sudo nmcli con up "${this.hotspotName}"`);
-      console.log('✅ Hotspot active');
-    } catch (e) {
-      console.warn('⚠️ Failed to activate hotspot:', e.message.trim());
-      console.warn('   This may be due to wlan0 interface issues or hardware problems');
-      throw e; // Re-throw to prevent continuing
-    }
+    await execPromise(`sudo nmcli con up "${this.hotspotName}"`);
+    console.log('✅ Hotspot active');
   }
 
-  async startCaptivePortalServices() {
-      console.log('🕸️ Starting Captive Portal Services (dnsmasq)...');
+  async startDnsmasq() {
+    console.log('mw Starting DNS/DHCP (dnsmasq)...');
 
-      // Stop any existing dnsmasq to free port 53
-      try {
-          await execPromise('sudo killall dnsmasq');
-      } catch (_) {}
+    // Stop existing
+    try { await execPromise('sudo killall dnsmasq'); } catch (_) {}
 
-      // Create config file
-      const configFile = '/tmp/veo-dnsmasq.conf';
-      const config = `
+    const configFile = '/tmp/veo-dnsmasq.conf';
+    // Simple config: DHCP + DNS spoofing to self
+    const config = `
 interface=wlan0
 bind-interfaces
-# DHCP Settings
 dhcp-range=10.42.0.10,10.42.0.254,12h
-dhcp-option=3,${this.ipAddress} # Gateway
-dhcp-option=6,${this.ipAddress} # DNS
-# DNS Spoofing (Captive Portal)
+dhcp-option=3,${this.ipAddress}
+dhcp-option=6,${this.ipAddress}
 address=/#/${this.ipAddress}
-# Logging
 log-queries
 log-dhcp
 `;
-      fs.writeFileSync(configFile, config);
+    fs.writeFileSync(configFile, config);
 
-      // Start dnsmasq
-      await execPromise(`sudo dnsmasq -C ${configFile}`);
-      console.log('✅ Captive Portal DNS/DHCP started');
+    await execPromise(`sudo dnsmasq -C ${configFile}`);
+    console.log('✅ dnsmasq started');
   }
 
   setupRoutes() {
-    console.log('🛠️ Setting up provisioning routes...');
-    
-    // Helper to serve the page
-    const servePage = (res) => {
-        res.sendFile(path.join(__dirname, 'public', 'provisioning.html'));
-    };
+    // Serve the provisioning page
+    const servePage = (res) => res.sendFile(path.join(__dirname, 'public', 'provisioning.html'));
 
-    // Main entry point
     this.app.get('/', (req, res) => servePage(res));
     
-    // Captive Portal Detection URLs (Android, iOS, Windows)
-    this.app.get('/generate_204', (req, res) => servePage(res));
-    this.app.get('/ncsi.txt', (req, res) => servePage(res));
-    this.app.get('/hotspot-detect.html', (req, res) => servePage(res));
-    this.app.get('/canonical.html', (req, res) => servePage(res));
-    this.app.get('/success.txt', (req, res) => servePage(res));
+    // Captive portal detection URLs
+    const cpRoutes = [
+        '/generate_204', '/ncsi.txt', '/hotspot-detect.html', 
+        '/canonical.html', '/success.txt', '/library/test/success.html'
+    ];
+    cpRoutes.forEach(r => this.app.get(r, (req, res) => servePage(res)));
 
-    // Catch-all for random domains (since we spoof DNS)
+    // Catch-all for other domains (DNS spoofing redirects them to us)
     this.app.use((req, res, next) => {
-        // If it's an API call or static asset, let it pass (managed by other routes/static middleware)
-        // But if it's a random GET request (likely a CP check), redirect to root
-        // Note: The static middleware is already setup in index.js BEFORE this class is used? 
-        // index.js calls setupServer() which sets static.
-        // So existing files will be served.
-        // We just need to catch 404s that are actually CP checks.
-        
-        if (req.method === 'GET') {
-            // Redirect everything else to root
-            return res.redirect('/');
+        if (req.method === 'GET' && !req.path.startsWith('/provisioning') && !req.path.includes('.')) {
+             return res.redirect('/');
         }
         next();
     });
 
-
+    // Save handler
     this.app.post('/provisioning/save', async (req, res) => {
       try {
-        console.log('📥 Received configuration data');
+        console.log('📥 Saving config...');
         await this.handleSave(req.body);
         res.json({ success: true });
-        
-        // Restart
         setTimeout(() => {
-          console.log('🔄 Configuration saved. Restarting system...');
-          process.exit(0);
-        }, 2000);
+             console.log('🔄 Restarting...');
+             process.exit(0); 
+        }, 1000);
       } catch (e) {
-        console.error('❌ Save failed:', e);
+        console.error('Save error:', e);
         res.status(500).json({ error: e.message });
       }
     });
   }
 
   async handleSave(data) {
-    // 1. Save credentials.json
     if (data.email && data.password) {
-      const credentials = {
-        email: data.email,
-        password: data.password
-      };
-      fs.writeFileSync(path.join(__dirname, '..', 'credentials.json'), JSON.stringify(credentials, null, 2));
-      console.log('💾 Saved credentials.json');
+      fs.writeFileSync(path.join(__dirname, '..', 'credentials.json'), 
+        JSON.stringify({ email: data.email, password: data.password }, null, 2));
     }
 
-    // 2. Save config.json
-    const baseWidth = 1920;
-    const playX = data.playX !== undefined && data.playX !== null && !isNaN(data.playX) ? parseInt(data.playX) : 960;
-    const playY = data.playY !== undefined && data.playY !== null && !isNaN(data.playY) ? parseInt(data.playY) : 540;
-    const fsX = data.fullscreenX !== undefined && data.fullscreenX !== null && !isNaN(data.fullscreenX) ? parseInt(data.fullscreenX) : 1800;
-    const fsY = data.fullscreenY !== undefined && data.fullscreenY !== null && !isNaN(data.fullscreenY) ? parseInt(data.fullscreenY) : 1000;
-
-    const coords = {
-        [baseWidth]: {
-            play: { x: playX, y: playY },
-            fullscreen: { x: fsX, y: fsY },
-            baseWidth: baseWidth
-        }
-    };
-
+    // Save config.json (simplified)
     const config = {
-      deviceId: data.deviceId || `raspberry-pi-${Date.now()}`,
-      azure: {
-        bbsUrl: data.bbsUrl || "https://veo-bbs.azurewebsites.net/api"
-      },
-      display: {
-        preferredMode: "auto",
-        modes: ["3840x2160", "1920x1080", "1280x720"]
-      },
-      coordinates: coords,
+      deviceId: data.deviceId || `rpi-${Date.now()}`,
+      azure: { bbsUrl: data.bbsUrl || "https://veo-bbs.azurewebsites.net/api" },
+      display: { preferredMode: "auto", modes: ["1920x1080"] },
       viewport: { width: 1920, height: 1080 }
     };
-
     fs.writeFileSync(path.join(__dirname, '..', 'config.json'), JSON.stringify(config, null, 2));
-    console.log('💾 Saved config.json');
 
-    // 3. Configure WiFi
+    // Configure WiFi Client Mode (if provided)
     if (data.wifiSsid) {
-      console.log(`📶 Configuring WiFi Profile: ${data.wifiSsid}`);
-      try {
-        const safeSsid = data.wifiSsid.replace(/"/g, '\\"');
-        const safePass = data.wifiPassword ? data.wifiPassword.replace(/"/g, '\\"') : '';
-        
-        try { await execPromise(`sudo nmcli connection delete "${safeSsid}"`); } catch(_) {}
-        
-        let cmd = `sudo nmcli con add type wifi ifname wlan0 con-name "${safeSsid}" ssid "${safeSsid}"`;
-        if (safePass) {
-             cmd += ` wifi-sec.key-mgmt wpa-psk wifi-sec.psk "${safePass}"`;
-        }
-        await execPromise(cmd);
-        await execPromise(`sudo nmcli con modify "${safeSsid}" connection.autoconnect yes`);
-        
-        console.log('✅ WiFi profile created (will connect on restart)');
-      } catch (e) {
-        console.error('⚠️ WiFi profile creation error:', e.message);
-        throw new Error(`Failed to configure WiFi: ${e.message}`);
-      }
+      console.log(`📶 Switching to Client WiFi: ${data.wifiSsid}`);
+      const ssid = data.wifiSsid.replace(/"/g, '\\"');
+      const pass = data.wifiPassword ? data.wifiPassword.replace(/"/g, '\\"') : '';
+      
+      try { await execPromise(`sudo nmcli con delete "${ssid}"`); } catch(_) {}
+      
+      let cmd = `sudo nmcli con add type wifi ifname wlan0 con-name "${ssid}" ssid "${ssid}"`;
+      if (pass) cmd += ` wifi-sec.key-mgmt wpa-psk wifi-sec.psk "${pass}"`;
+      
+      await execPromise(cmd);
+      await execPromise(`sudo nmcli con modify "${ssid}" connection.autoconnect yes`);
     }
   }
 }
