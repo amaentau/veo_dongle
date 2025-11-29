@@ -56,7 +56,7 @@ load_display_config() {
           DISPLAY_MODES=("${parsedModes[@]}")
         fi
       fi
-
+      
       local pref
       if pref="$(jq -r '.display.preferredMode // empty' "${CONFIG_JSON}" 2>/dev/null)" && [[ -n "${pref}" ]]; then
         DISPLAY_PREFERRED="${pref}"
@@ -163,7 +163,8 @@ apt-get install -y \
   libasound2 \
   matchbox-window-manager \
   xterm \
-  network-manager
+  network-manager \
+  dnsmasq
 
 # Ensure dhcpcd is disabled if we are using NetworkManager to avoid conflicts
 if systemctl list-unit-files | grep -q dhcpcd; then
@@ -172,7 +173,7 @@ if systemctl list-unit-files | grep -q dhcpcd; then
 fi
 
 # Allow nmcli without password for the service user (for provisioning)
-echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/nmcli, /usr/bin/systemctl" > "/etc/sudoers.d/010_veo-dongle"
+echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/nmcli, /usr/bin/systemctl, /usr/sbin/dnsmasq, /usr/bin/killall" > "/etc/sudoers.d/010_veo-dongle"
 chmod 0440 "/etc/sudoers.d/010_veo-dongle"
 
 
