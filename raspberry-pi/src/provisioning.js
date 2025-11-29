@@ -37,13 +37,29 @@ class ProvisioningManager {
     // Clean up old connection
     try { await execPromise(`sudo nmcli connection delete "${this.hotspotName}"`); } catch(_) {}
 
-    // Create new connection (Open, Manual IP)
-    // ipv4.gateway is deliberately omitted to prevent clients from thinking there is internet
+    // Create new connection (Open, Manual IP) in one go to prevent "secrets required" errors
     console.log('   Creating connection profile...');
-    await execPromise(`sudo nmcli con add type wifi ifname wlan0 con-name "${this.hotspotName}" autoconnect yes ssid "${this.ssid}"`);
-    await execPromise(`sudo nmcli con modify "${this.hotspotName}" 802-11-wireless.mode ap 802-11-wireless.band bg 802-11-wireless.channel 1`);
-    await execPromise(`sudo nmcli con modify "${this.hotspotName}" ipv4.method manual ipv4.addresses ${this.ipAddress}/24`);
-    await execPromise(`sudo nmcli con modify "${this.hotspotName}" wifi-sec.key-mgmt none`);
+    
+    const cmd = [
+      'sudo nmcli con add',
+      'type wifi',
+      'ifname wlan0',
+      `con-name "${this.hotspotName}"`,
+      'autoconnect yes',
+      `ssid "${this.ssid}"`,
+      '802-11-wireless.mode ap',
+      '802-11-wireless.band bg', 
+      'ipv4.method manual', 
+      `ipv4.addresses ${this.ipAddress}/24`, 
+      'wifi-sec.key-mgmt none'
+    ].join(' ');
+
+    try {
+        await execPromise(cmd);
+    } catch (e) {
+        console.error('   nmcli create failed:', e.message);
+        throw e;
+    }
 
     // Bring up
     console.log('   Activating hotspot...');
