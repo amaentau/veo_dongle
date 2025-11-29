@@ -36,7 +36,12 @@ wait_for_connectivity() {
   return 1
 }
 
-wait_for_connectivity
+# Skip connectivity check if config.json is missing (Provisioning Mode)
+if [[ ! -f "${APP_ROOT}/config.json" ]]; then
+  echo "[INFO] config.json not found. Skipping connectivity check and entering Provisioning Mode."
+else
+  wait_for_connectivity
+fi
 
 cd "${APP_ROOT}"
 

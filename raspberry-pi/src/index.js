@@ -6,6 +6,7 @@ const http = require('http');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const ProvisioningManager = require('./provisioning');
 require('dotenv').config();
 
 class VeoDongleRaspberryPi {
@@ -22,15 +23,27 @@ class VeoDongleRaspberryPi {
     this.runtimeEnvironment = process.env.RUNTIME_ENV || (this.detectWSL() ? 'wsl' : 'raspberry');
 
     // Load configuration
-    this.config = this.loadConfig();
+    this.config = this.tryLoadConfig();
+
+    // Load credentials
+    this.credentials = this.loadCredentials();
+
+    // Check if provisioning is needed (missing config OR missing credentials)
+    this.needsProvisioning = !this.config || !this.credentials;
+
+    if (this.needsProvisioning) {
+      console.log('⚠️ Missing configuration or credentials - Provisioning Mode required');
+      if (!this.config) this.config = {}; // Prevent crashes
+    }
+
     this.displayConfig = this.config.display || {};
-    this.logDisplaySummary();
+    if (!this.needsProvisioning) {
+      this.logDisplaySummary();
+    }
 
     // Device configuration (allow configuration file to drive the default ID)
     this.deviceId = this.config.deviceId || process.env.DEVICE_ID || `raspberry-pi-${Date.now()}`;
 
-    // Load credentials if available
-    this.credentials = this.loadCredentials();
     console.log(`🔐 Credentials loaded: ${this.credentials ? 'YES' : 'NO'}`);
     if (this.credentials) {
       console.log(`   Email: ${this.credentials.email ? '***' + this.credentials.email.slice(-10) : 'MISSING'}`);
@@ -47,19 +60,21 @@ class VeoDongleRaspberryPi {
     this.debug = process.env.DEBUG === 'true';
   }
 
-  loadConfig() {
+  tryLoadConfig() {
     const configDir = path.join(__dirname, '..');
     const jsonConfigPath = path.join(configDir, 'config.json');
 
     if (!fs.existsSync(jsonConfigPath)) {
-      throw new Error(`Configuration file not found: ${jsonConfigPath}. Please create config.json with required settings.`);
+      console.log('Config file not found.');
+      return null;
     }
 
     try {
       console.log('Loading JSON configuration from config.json');
       return JSON.parse(fs.readFileSync(jsonConfigPath, 'utf8'));
     } catch (error) {
-      throw new Error(`Failed to parse config.json: ${error.message}`);
+      console.error(`Failed to parse config.json: ${error.message}`);
+      return null;
     }
   }
 
@@ -91,6 +106,16 @@ class VeoDongleRaspberryPi {
     console.log('Initializing Veo Dongle Raspberry Pi...');
 
     try {
+      // Provisioning check
+      if (this.needsProvisioning) {
+        const provisioning = new ProvisioningManager(this.app, this.port);
+        await provisioning.start();
+        this.server.listen(this.port, () => {
+          console.log(`Provisioning Server listening on port ${this.port}`);
+        });
+        return;
+      }
+
       // First check for local Stream URL configuration
       if (process.env.STREAM_URL) {
         this.streamUrl = process.env.STREAM_URL;

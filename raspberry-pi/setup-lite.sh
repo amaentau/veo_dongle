@@ -162,7 +162,19 @@ apt-get install -y \
   libgbm1 \
   libasound2 \
   matchbox-window-manager \
-  xterm
+  xterm \
+  network-manager
+
+# Ensure dhcpcd is disabled if we are using NetworkManager to avoid conflicts
+if systemctl list-unit-files | grep -q dhcpcd; then
+  info "Disabling dhcpcd to avoid conflicts with NetworkManager"
+  systemctl disable --now dhcpcd >/dev/null 2>&1 || true
+fi
+
+# Allow nmcli without password for the service user (for provisioning)
+echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/nmcli, /usr/bin/systemctl" > "/etc/sudoers.d/010_veo-dongle"
+chmod 0440 "/etc/sudoers.d/010_veo-dongle"
+
 
 # Install jq separately as it may not be in default repos
 info "Installing jq for JSON parsing"
