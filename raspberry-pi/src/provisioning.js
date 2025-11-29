@@ -21,6 +21,7 @@ class ProvisioningManager {
       await this.startDnsmasq();
       this.setupRoutes();
       console.log(`✅ Provisioning ready. Connect to "${this.ssid}" and go to http://${this.ipAddress}:${this.port}`);
+      this.startDiagnostics();
     } catch (e) {
       console.error('❌ Provisioning setup failed:', e);
       // Do not exit, so we can inspect the state
@@ -46,7 +47,8 @@ class ProvisioningManager {
 
     // Bring up
     console.log('   Activating hotspot...');
-    await execPromise(`sudo nmcli con up "${this.hotspotName}"`);
+    const { stdout } = await execPromise(`sudo nmcli con up "${this.hotspotName}"`);
+    console.log('   nmcli output:', stdout.trim());
     console.log('✅ Hotspot active');
   }
 
@@ -72,6 +74,37 @@ log-dhcp
 
     await execPromise(`sudo dnsmasq -C ${configFile}`);
     console.log('✅ dnsmasq started');
+  }
+
+  startDiagnostics() {
+    console.log('🔍 Starting periodic diagnostics (every 10s)...');
+    setInterval(async () => {
+        try {
+            console.log('--- 🔍 Diagnostic Check ---');
+            
+            // Check active connections
+            try {
+                const { stdout: conStatus } = await execPromise('nmcli connection show --active');
+                console.log('Active Connections:\n', conStatus.trim());
+            } catch (e) { console.log('nmcli error:', e.message); }
+            
+            // Check IP address (no sudo needed for read)
+            try {
+                const { stdout: ipStatus } = await execPromise('ip -4 addr show wlan0');
+                console.log('wlan0 IP:\n', ipStatus.trim());
+            } catch (e) { console.log('ip error:', e.message); }
+            
+            // Check dnsmasq process
+            try {
+                const { stdout: dnsmasqStatus } = await execPromise('pgrep -a dnsmasq');
+                console.log('dnsmasq process:\n', dnsmasqStatus.trim());
+            } catch (e) { console.log('dnsmasq not running'); }
+
+            console.log('---------------------------');
+        } catch (e) {
+            console.error('Diagnostic check failed:', e.message);
+        }
+    }, 10000);
   }
 
   setupRoutes() {
