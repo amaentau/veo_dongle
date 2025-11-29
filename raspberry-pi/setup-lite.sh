@@ -166,6 +166,12 @@ apt-get install -y \
   network-manager \
   dnsmasq
 
+# Disable system-wide dnsmasq service to avoid conflicts with our custom instance / NetworkManager
+if systemctl list-unit-files | grep -q dnsmasq.service; then
+  info "Disabling system-wide dnsmasq service to allow custom usage"
+  systemctl disable --now dnsmasq >/dev/null 2>&1 || true
+fi
+
 # Ensure dhcpcd is disabled if we are using NetworkManager to avoid conflicts
 if systemctl list-unit-files | grep -q dhcpcd; then
   info "Disabling dhcpcd to avoid conflicts with NetworkManager"

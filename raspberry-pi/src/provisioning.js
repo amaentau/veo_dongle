@@ -63,7 +63,7 @@ class ProvisioningManager {
       // We want to run our own dnsmasq for Captive Portal DNS spoofing.
       await execPromise(`sudo nmcli con add type wifi ifname wlan0 con-name "${this.hotspotName}" autoconnect yes ssid "${this.ssid}"`);
       await execPromise(`sudo nmcli con modify "${this.hotspotName}" 802-11-wireless.mode ap 802-11-wireless.band bg`);
-      // Set manual IP
+      // Set manual IP (do not set gateway as it causes issues when self-hosting)
       await execPromise(`sudo nmcli con modify "${this.hotspotName}" ipv4.method manual ipv4.addresses ${this.ipAddress}/24`);
       // No security (Open)
       await execPromise(`sudo nmcli con modify "${this.hotspotName}" wifi-sec.key-mgmt none`);
@@ -72,8 +72,8 @@ class ProvisioningManager {
     console.log('   Activating hotspot...');
     try {
       // Ensure Wireless is unblocked
-      await execPromise('sudo rfkill unblock wifi');
-      await execPromise('sudo nmcli radio wifi on');
+      try { await execPromise('sudo rfkill unblock wifi'); } catch(_) {}
+      try { await execPromise('sudo nmcli radio wifi on'); } catch(_) {}
       
       await execPromise(`sudo nmcli con up "${this.hotspotName}"`);
       console.log('✅ Hotspot active');
