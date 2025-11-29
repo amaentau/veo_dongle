@@ -42,20 +42,58 @@ class ProvisioningManager {
   async setupHotspot() {
     console.log('📡 Configuring Hotspot (Open)...');
 
-    // Check if wlan0 interface exists and is up
+    // First unblock any rfkill blocks
     try {
-      await execPromise('ip link show wlan0');
-      console.log('   wlan0 interface found');
+      await execPromise('sudo rfkill unblock wifi');
+      console.log('   WiFi rfkill unblocked');
     } catch (e) {
-      throw new Error('wlan0 interface not found. Please ensure WiFi hardware is available.');
+      console.warn('⚠️ Failed to unblock rfkill:', e.message);
     }
 
-    // Ensure wlan0 is up
-    try {
-      await execPromise('sudo ip link set wlan0 up');
-      console.log('   wlan0 interface brought up');
-    } catch (e) {
-      console.warn('⚠️ Failed to bring up wlan0:', e.message);
+    // Wait for wlan0 interface to be available
+    console.log('   Waiting for wlan0 interface...');
+    let wlan0Found = false;
+    for (let i = 1; i <= 15; i++) {
+      try {
+        await execPromise('ip link show wlan0');
+        console.log(`   wlan0 interface found (after ${i} attempts)`);
+        wlan0Found = true;
+        break;
+      } catch (e) {
+        console.log(`   wlan0 not ready yet... (${i}/15)`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+
+    if (!wlan0Found) {
+      throw new Error('wlan0 interface not found after 15 seconds. Please ensure WiFi hardware is available and not blocked.');
+    }
+
+    // Ensure wlan0 is up with retry logic
+    let wlan0Up = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await execPromise('sudo ip link set wlan0 up');
+        // Verify it's actually up
+        const result = await execPromise('ip link show wlan0');
+        if (result.includes('UP')) {
+          console.log(`   wlan0 interface brought up (attempt ${attempt})`);
+          wlan0Up = true;
+          break;
+        } else {
+          throw new Error('Interface not showing as UP');
+        }
+      } catch (e) {
+        console.warn(`⚠️ Failed to bring up wlan0 (attempt ${attempt}):`, e.message);
+        if (attempt < 3) {
+          console.log('   Retrying in 2 seconds...');
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+      }
+    }
+
+    if (!wlan0Up) {
+      throw new Error('Failed to bring wlan0 interface up after 3 attempts. Check hardware and rfkill status.');
     }
 
     // Check if connection exists

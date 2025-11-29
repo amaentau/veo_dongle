@@ -197,8 +197,29 @@ fi
 
 # Ensure wlan0 interface is up and available
 info "Ensuring wlan0 interface is available"
-ip link set wlan0 up 2>/dev/null || true
-nmcli device set wlan0 managed yes 2>/dev/null || true
+
+# First unblock any rfkill blocks
+rfkill unblock wifi 2>/dev/null || true
+
+# Wait for wlan0 to appear (up to 10 seconds)
+info "Waiting for wlan0 interface..."
+for i in {1..10}; do
+  if ip link show wlan0 >/dev/null 2>&1; then
+    info "wlan0 interface found"
+    break
+  fi
+  info "Waiting for wlan0... ($i/10)"
+  sleep 1
+done
+
+# Try to bring wlan0 up
+if ip link show wlan0 >/dev/null 2>&1; then
+  info "Bringing wlan0 interface up"
+  ip link set wlan0 up 2>/dev/null || warning "Failed to bring wlan0 up"
+  nmcli device set wlan0 managed yes 2>/dev/null || warning "Failed to set wlan0 as managed by NM"
+else
+  warning "wlan0 interface not found after waiting. WiFi hardware may not be available."
+fi
 
 # Allow nmcli without password for the service user (for provisioning)
 echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/nmcli, /usr/bin/systemctl, /usr/sbin/dnsmasq, /usr/bin/killall, /usr/sbin/rfkill" > "/etc/sudoers.d/010_veo-dongle"
@@ -210,8 +231,14 @@ cat > "/usr/local/bin/debug-wlan0" << 'EOF'
 echo "=== wlan0 Interface Debug ==="
 ip link show wlan0 || echo "wlan0 not found"
 echo ""
+echo "=== All Network Interfaces ==="
+ip link show
+echo ""
 echo "=== NetworkManager Device Status ==="
 nmcli device show wlan0 || echo "wlan0 not managed by NM"
+echo ""
+echo "=== All NetworkManager Devices ==="
+nmcli device show
 echo ""
 echo "=== NetworkManager Connections ==="
 nmcli connection show
@@ -219,10 +246,59 @@ echo ""
 echo "=== rfkill Status ==="
 rfkill list
 echo ""
+echo "=== WiFi Hardware Check ==="
+iwconfig 2>/dev/null | grep -A 2 wlan0 || echo "No wlan0 in iwconfig"
+echo ""
 echo "=== NetworkManager Status ==="
 systemctl status NetworkManager --no-pager -l | head -20
+echo ""
+echo "=== System Logs (last wlan0 mentions) ==="
+journalctl -n 50 --since "5 minutes ago" | grep -i wlan0 || echo "No recent wlan0 logs"
 EOF
 chmod +x "/usr/local/bin/debug-wlan0"
+
+# Add wlan0 bring-up helper script
+cat > "/usr/local/bin/bringup-wlan0" << 'EOF'
+#!/bin/bash
+echo "=== Bringing up wlan0 interface ==="
+
+# Unblock rfkill
+echo "Unblocking rfkill..."
+rfkill unblock wifi 2>/dev/null || echo "rfkill unblock failed"
+
+# Wait for interface
+echo "Waiting for wlan0..."
+for i in {1..10}; do
+  if ip link show wlan0 >/dev/null 2>&1; then
+    echo "wlan0 found"
+    break
+  fi
+  echo "Waiting... ($i/10)"
+  sleep 1
+done
+
+# Bring up interface
+if ip link show wlan0 >/dev/null 2>&1; then
+  echo "Bringing wlan0 up..."
+  ip link set wlan0 up
+  if ip link show wlan0 | grep -q UP; then
+    echo "✅ wlan0 is UP"
+  else
+    echo "❌ Failed to bring wlan0 up"
+    exit 1
+  fi
+else
+  echo "❌ wlan0 interface not found"
+  exit 1
+fi
+
+# Set as managed by NetworkManager
+echo "Setting wlan0 as managed by NetworkManager..."
+nmcli device set wlan0 managed yes 2>/dev/null || echo "Failed to set managed"
+
+echo "=== wlan0 bring-up complete ==="
+EOF
+chmod +x "/usr/local/bin/bringup-wlan0"
 
 
 # Install jq separately as it may not be in default repos
