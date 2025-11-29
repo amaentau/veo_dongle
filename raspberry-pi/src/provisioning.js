@@ -38,15 +38,13 @@ class ProvisioningManager {
     } catch (_) {}
 
     // 2. Force disconnect wlan0 to free it for AP mode
-    // WARNING: This will kill SSH if connected via WiFi!
     console.log('   Disconnecting wlan0 to ensure clean state...');
     try {
         await execPromise('sudo nmcli device disconnect wlan0');
-        // Wait a moment for the disconnect to settle
-        await new Promise(resolve => setTimeout(resolve, 2000));
-    } catch (e) {
-        console.warn('   Disconnect warning (might already be disconnected):', e.message);
-    }
+    } catch (_) {}
+    
+    // Force link down to reset state (helps clear DORMANT/NO-CARRIER)
+    try { await execPromise('sudo ip link set wlan0 down'); } catch (_) {}
 
     // 3. Clean up old connection
     try { 
@@ -62,11 +60,11 @@ class ProvisioningManager {
         await execPromise(`sudo nmcli con add type wifi ifname wlan0 con-name "${this.hotspotName}" autoconnect no ssid "${this.ssid}"`);
         
         // Network settings (AP mode, Channel 1, Open Security)
-        // key-mgmt=none is critical
         await execPromise(`sudo nmcli con modify "${this.hotspotName}" 802-11-wireless.mode ap 802-11-wireless.band bg 802-11-wireless.channel 1 wifi-sec.key-mgmt none`);
         
-        // IP settings
-        await execPromise(`sudo nmcli con modify "${this.hotspotName}" ipv4.method manual ipv4.addresses ${this.ipAddress}/24 ipv4.gateway ""`);
+        // IP settings (Manual, No Gateway)
+        // We omit ipv4.gateway explicitly to avoid syntax issues; manual implies no gateway unless specified
+        await execPromise(`sudo nmcli con modify "${this.hotspotName}" ipv4.method manual ipv4.addresses ${this.ipAddress}/24`);
         
         console.log('   Profile created. Activating...');
         
@@ -76,6 +74,10 @@ class ProvisioningManager {
         // Explicit activation
         const { stdout } = await execPromise(`sudo nmcli con up "${this.hotspotName}"`);
         console.log('   nmcli output:', stdout.trim());
+        
+        // Ensure link is UP (kick it out of DORMANT)
+        try { await execPromise('sudo ip link set wlan0 up'); } catch(_) {}
+        
         console.log('✅ Hotspot active');
 
     } catch (e) {
@@ -130,11 +132,23 @@ log-dhcp
                 console.log('Active Connections:\n', conStatus.trim());
             } catch (e) { console.log('nmcli error:', e.message); }
             
-            // Check IP address (no sudo needed for read)
+            // Check IP address
             try {
                 const { stdout: ipStatus } = await execPromise('ip -4 addr show wlan0');
                 console.log('wlan0 IP:\n', ipStatus.trim());
             } catch (e) { console.log('ip error:', e.message); }
+            
+            // Check Wireless Info (Mode, Channel)
+            try {
+                const { stdout: iwStatus } = await execPromise('iw dev wlan0 info');
+                console.log('Wireless Info:\n', iwStatus.trim());
+            } catch (e) { console.log('iw error:', e.message); }
+
+            // Check Link State
+            try {
+                const { stdout: linkStatus } = await execPromise('ip link show wlan0');
+                console.log('Link State:\n', linkStatus.trim());
+            } catch (e) { console.log('ip link error:', e.message); }
             
             // Check dnsmasq process
             try {
