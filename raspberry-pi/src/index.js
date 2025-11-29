@@ -105,14 +105,14 @@ class VeoDongleRaspberryPi {
   async initialize() {
     console.log('Initializing Veo Dongle Raspberry Pi...');
 
+    // Setup server (middleware) early so it's available for provisioning too
+    this.setupServer();
+
     try {
       // Provisioning check
       if (this.needsProvisioning) {
         const provisioning = new ProvisioningManager(this.app, this.port);
         await provisioning.start();
-        this.server.listen(this.port, () => {
-          console.log(`Provisioning Server listening on port ${this.port}`);
-        });
         return;
       }
 
@@ -137,9 +137,6 @@ class VeoDongleRaspberryPi {
       if (!this.streamUrl) {
          throw new Error('No Stream URL configured (env: STREAM_URL) or found in BBS');
       }
-
-      // Setup server
-      this.setupServer();
 
       // Launch browser
       await this.launchBrowser();
