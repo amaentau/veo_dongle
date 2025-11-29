@@ -35,37 +35,45 @@ class ProvisioningManager {
     try { await execPromise('sudo rfkill unblock wifi'); } catch(_) {}
 
     // Clean up old connection
-    try { await execPromise(`sudo nmcli connection delete "${this.hotspotName}"`); } catch(_) {}
+    try { 
+      console.log('   Removing old connection...');
+      await execPromise(`sudo nmcli connection delete "${this.hotspotName}"`); 
+    } catch(_) {}
 
-    // Create new connection (Open, Manual IP) in one go to prevent "secrets required" errors
+    // Create new connection (Open, Manual IP)
+    // We create with autoconnect=no first to ensure all settings are applied before activation
     console.log('   Creating connection profile...');
     
-    const cmd = [
-      'sudo nmcli con add',
-      'type wifi',
-      'ifname wlan0',
-      `con-name "${this.hotspotName}"`,
-      'autoconnect yes',
-      `ssid "${this.ssid}"`,
-      '802-11-wireless.mode ap',
-      '802-11-wireless.band bg', 
-      'ipv4.method manual', 
-      `ipv4.addresses ${this.ipAddress}/24`, 
-      'wifi-sec.key-mgmt none'
-    ].join(' ');
-
     try {
-        await execPromise(cmd);
+        // Base connection
+        await execPromise(`sudo nmcli con add type wifi ifname wlan0 con-name "${this.hotspotName}" autoconnect no ssid "${this.ssid}"`);
+        
+        // Network settings (AP mode, Channel 1, Open Security)
+        // key-mgmt=none is critical for "secrets required" error
+        await execPromise(`sudo nmcli con modify "${this.hotspotName}" 802-11-wireless.mode ap 802-11-wireless.band bg 802-11-wireless.channel 1 wifi-sec.key-mgmt none`);
+        
+        // IP settings
+        await execPromise(`sudo nmcli con modify "${this.hotspotName}" ipv4.method manual ipv4.addresses ${this.ipAddress}/24 ipv4.gateway ""`);
+        
+        console.log('   Profile created. Activating...');
+        
+        // Reload just in case
+        try { await execPromise('sudo nmcli connection reload'); } catch(_) {}
+
+        // Explicit activation
+        const { stdout } = await execPromise(`sudo nmcli con up "${this.hotspotName}"`);
+        console.log('   nmcli output:', stdout.trim());
+        console.log('✅ Hotspot active');
+
     } catch (e) {
-        console.error('   nmcli create failed:', e.message);
+        console.error('❌ Hotspot setup failed:', e.message);
+        // Log extra info for debugging
+        try {
+             const { stdout } = await execPromise('nmcli con show "' + this.hotspotName + '"');
+             console.log('   Connection details:', stdout);
+        } catch (_) {}
         throw e;
     }
-
-    // Bring up
-    console.log('   Activating hotspot...');
-    const { stdout } = await execPromise(`sudo nmcli con up "${this.hotspotName}"`);
-    console.log('   nmcli output:', stdout.trim());
-    console.log('✅ Hotspot active');
   }
 
   async startDnsmasq() {
