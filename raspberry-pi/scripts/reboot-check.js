@@ -2,7 +2,8 @@ const fs = require('fs');
 const path = require('path');
 
 const STATE_FILE = path.join(__dirname, '..', '.reboot_history');
-const WINDOW_MS = 45000; // 45 seconds
+const MARKER_FILE = '/tmp/force_provisioning';
+const WINDOW_MS = 120000; // 120 seconds (2 minutes) to allow for 3 full boot cycles
 const THRESHOLD = 3;
 
 function checkRebootLoop() {
@@ -38,6 +39,12 @@ function checkRebootLoop() {
   // Check if threshold is met
   if (history.length >= THRESHOLD) {
     console.log(`⚠️  Detected ${history.length} reboots in ${WINDOW_MS/1000}s.`);
+    try {
+      fs.writeFileSync(MARKER_FILE, 'true');
+      console.log(`CHECK: Created marker file ${MARKER_FILE}`);
+    } catch (e) {
+      console.error('CHECK: Failed to create marker file:', e.message);
+    }
     return true; // Trigger provisioning
   }
 

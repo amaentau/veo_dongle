@@ -398,6 +398,32 @@ chmod +x "${SERVICE_HOME}/.xinitrc"
 
 success "Setup complete! You can launch the kiosk manually via ${APP_ROOT}/scripts/start-kiosk.sh."
 
+info "Installing early-boot reboot monitor service"
+MONITOR_SERVICE_FILE="/etc/systemd/system/veo-reboot-monitor.service"
+
+cat >"${MONITOR_SERVICE_FILE}" <<EOF
+[Unit]
+Description=Veo Reboot Monitor (Early Boot)
+DefaultDependencies=no
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/node ${APP_ROOT}/scripts/reboot-check.js
+RemainAfterExit=yes
+User=${SERVICE_USER}
+Group=${SERVICE_USER}
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=sysinit.target
+EOF
+
+systemctl enable veo-reboot-monitor.service
+success "Early-boot monitor service installed."
+
 info "Installing systemd service for Veo Kiosk"
 SERVICE_FILE="/etc/systemd/system/veo-dongle.service"
 
