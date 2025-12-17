@@ -12,7 +12,7 @@ export DISPLAY="${DISPLAY:-:0}"
 export XAUTHORITY="${HOME}/.Xauthority"
 export CHROMIUM_PATH="${CHROMIUM_PATH:-/usr/bin/chromium-browser}"
 
-# Check for reboot loop - if 3 reboots in 45s, force provisioning mode
+# Check for reboot loop - if 3 reboots in 90s, force provisioning mode
 # Do this EARLY, before waiting for network
 if ! node "${SCRIPT_DIR}/reboot-check.js"; then
   echo "[WARNING] Reboot loop detected! Forcing provisioning mode."

@@ -182,6 +182,27 @@
             margin-bottom: 2px;
             display: block;
         }
+        
+        .scan-results {
+            margin-top: 10px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+        .scan-result-btn {
+            background: #f0f0f5;
+            border: 1px solid #d2d2d7;
+            border-radius: 12px;
+            padding: 6px 12px;
+            font-size: 13px;
+            color: #333;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .scan-result-btn:hover {
+            background: #e5e5ea;
+            border-color: #999;
+        }
     </style>
 </head>
 <body>
@@ -202,6 +223,9 @@
                 <div class="section-title">WiFi Connections</div>
                 <small id="scanStatus" style="color: #86868b; font-size: 12px; display: none;">Scanning...</small>
             </div>
+
+            <!-- Visible scan results -->
+            <div id="scan-results-display" class="scan-results"></div>
             
             <div id="existing-wifi-list" style="margin-bottom: 15px; display: none;">
                 <label style="color: #666; font-size: 0.9em;">Currently Saved Networks:</label>
@@ -338,12 +362,19 @@
 
         // Scan logic
         async function fetchWifiScan() {
+            const scanStatus = document.getElementById('scanStatus');
+            const resultsDiv = document.getElementById('scan-results-display');
+            
             scanStatus.style.display = 'inline';
             scanStatus.textContent = 'Scanning...';
+            resultsDiv.innerHTML = '';
+
             try {
                 const res = await fetch('/provisioning/wifi-scan');
                 if (res.ok) {
                     const networks = await res.json();
+                    
+                    // Populate datalist (kept for manual typing support)
                     scanList.innerHTML = '';
                     networks.forEach(net => {
                         const opt = document.createElement('option');
@@ -351,8 +382,36 @@
                         opt.label = `Signal: ${net.signal}% ${net.security ? '('+net.security+')' : ''}`;
                         scanList.appendChild(opt);
                     });
-                    scanStatus.textContent = networks.length > 0 ? `${networks.length} networks found` : 'No networks found';
-                    setTimeout(() => { scanStatus.style.display = 'none'; }, 3000);
+
+                    // Populate visible buttons
+                    networks.forEach(net => {
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.className = 'scan-result-btn';
+                        btn.textContent = `${net.ssid} (${net.signal}%)`;
+                        btn.title = 'Click to use this network';
+                        btn.onclick = () => {
+                            // Find first empty ssid input or add new
+                            const inputs = Array.from(document.querySelectorAll('.wifi-ssid'));
+                            let target = inputs.find(i => !i.value);
+                            if (!target) {
+                                wifiContainer.appendChild(createWifiItem());
+                                target = wifiContainer.lastElementChild.querySelector('.wifi-ssid');
+                            }
+                            target.value = net.ssid;
+                            // Highlight the input briefly
+                            target.style.borderColor = '#0071e3';
+                            setTimeout(() => target.style.borderColor = '', 1000);
+                            
+                            // Focus password
+                            const passInput = target.closest('.wifi-inputs').querySelector('.wifi-pass');
+                            if (passInput) passInput.focus();
+                        };
+                        resultsDiv.appendChild(btn);
+                    });
+
+                    scanStatus.textContent = networks.length > 0 ? `${networks.length} networks found:` : 'No networks found';
+                    
                 } else {
                     scanStatus.textContent = 'Scan failed';
                 }

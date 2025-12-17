@@ -3,7 +3,7 @@ const path = require('path');
 
 const STATE_FILE = path.join(__dirname, '..', '.reboot_history');
 const MARKER_FILE = '/tmp/force_provisioning';
-const WINDOW_MS = 120000; // 120 seconds (2 minutes) to allow for 3 full boot cycles
+const WINDOW_MS = 90000; // 90 seconds
 const THRESHOLD = 3;
 
 function checkRebootLoop() {
