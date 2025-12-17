@@ -332,6 +332,10 @@
         const addWifiBtn = document.getElementById('addWifiBtn');
         const scanStatus = document.getElementById('scanStatus');
         const scanList = document.getElementById('wifi-scan-results');
+        
+        // State
+        let configuredSsids = [];
+        let scanResults = [];
 
         function createWifiItem() {
             const div = document.createElement('div');
@@ -360,9 +364,53 @@
         // Initialize with one empty network card
         wifiContainer.appendChild(createWifiItem());
 
+        function renderScanResults() {
+            const resultsDiv = document.getElementById('scan-results-display');
+            if (!resultsDiv) return;
+            resultsDiv.innerHTML = '';
+
+            scanResults.forEach(net => {
+                const isConfigured = configuredSsids.includes(net.ssid);
+                
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'scan-result-btn';
+                btn.style.borderColor = isConfigured ? '#34c759' : '#d2d2d7';
+                btn.style.backgroundColor = isConfigured ? '#e8f5e9' : '#f0f0f5';
+                
+                // Add checkmark if configured
+                const label = isConfigured ? `✓ ${net.ssid}` : net.ssid;
+                btn.textContent = `${label} (${net.signal}%)`;
+                
+                btn.title = isConfigured ? 'This network is already configured' : 'Click to use this network';
+                
+                btn.onclick = () => {
+                    const inputs = Array.from(document.querySelectorAll('.wifi-ssid'));
+                    let target = inputs.find(i => !i.value);
+                    if (!target) {
+                        wifiContainer.appendChild(createWifiItem());
+                        target = wifiContainer.lastElementChild.querySelector('.wifi-ssid');
+                    }
+                    target.value = net.ssid;
+                    target.style.borderColor = '#0071e3';
+                    setTimeout(() => target.style.borderColor = '', 1000);
+                    
+                    const passInput = target.closest('.wifi-inputs').querySelector('.wifi-pass');
+                    if (passInput) passInput.focus();
+                };
+                resultsDiv.appendChild(btn);
+            });
+            
+            const count = scanResults.length;
+            if (count > 0) {
+                 scanStatus.textContent = `${count} network${count === 1 ? '' : 's'} found:`;
+            } else {
+                 // Keep "Scanning..." or error if set elsewhere, or clear if empty list returned
+            }
+        }
+
         // Scan logic
         async function fetchWifiScan() {
-            const scanStatus = document.getElementById('scanStatus');
             const resultsDiv = document.getElementById('scan-results-display');
             
             scanStatus.style.display = 'inline';
@@ -373,6 +421,7 @@
                 const res = await fetch('/provisioning/wifi-scan');
                 if (res.ok) {
                     const networks = await res.json();
+                    scanResults = networks;
                     
                     // Populate datalist (kept for manual typing support)
                     scanList.innerHTML = '';
@@ -383,35 +432,11 @@
                         scanList.appendChild(opt);
                     });
 
-                    // Populate visible buttons
-                    networks.forEach(net => {
-                        const btn = document.createElement('button');
-                        btn.type = 'button';
-                        btn.className = 'scan-result-btn';
-                        btn.textContent = `${net.ssid} (${net.signal}%)`;
-                        btn.title = 'Click to use this network';
-                        btn.onclick = () => {
-                            // Find first empty ssid input or add new
-                            const inputs = Array.from(document.querySelectorAll('.wifi-ssid'));
-                            let target = inputs.find(i => !i.value);
-                            if (!target) {
-                                wifiContainer.appendChild(createWifiItem());
-                                target = wifiContainer.lastElementChild.querySelector('.wifi-ssid');
-                            }
-                            target.value = net.ssid;
-                            // Highlight the input briefly
-                            target.style.borderColor = '#0071e3';
-                            setTimeout(() => target.style.borderColor = '', 1000);
-                            
-                            // Focus password
-                            const passInput = target.closest('.wifi-inputs').querySelector('.wifi-pass');
-                            if (passInput) passInput.focus();
-                        };
-                        resultsDiv.appendChild(btn);
-                    });
-
-                    scanStatus.textContent = networks.length > 0 ? `${networks.length} networks found:` : 'No networks found';
+                    renderScanResults();
                     
+                    if (scanResults.length === 0) {
+                        scanStatus.textContent = 'No networks found';
+                    }
                 } else {
                     scanStatus.textContent = 'Scan failed';
                 }
@@ -433,6 +458,10 @@
                     if (data.deviceId) document.getElementById('deviceId').value = data.deviceId;
 
                     if (data.wifiNetworks && data.wifiNetworks.length > 0) {
+                        configuredSsids = data.wifiNetworks;
+                        // Re-render scan results to update "configured" status
+                        renderScanResults();
+
                         const list = document.getElementById('saved-networks');
                         const container = document.getElementById('existing-wifi-list');
                         if (list && container) {

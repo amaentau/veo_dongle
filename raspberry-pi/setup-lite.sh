@@ -172,7 +172,8 @@ if systemctl list-unit-files | grep -q dhcpcd; then
 fi
 
 # Allow nmcli without password for the service user (for provisioning)
-echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/nmcli, /usr/bin/systemctl" > "/etc/sudoers.d/010_veo-dongle"
+# Also allow iptables for captive portal redirection
+echo "${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/nmcli, /usr/bin/systemctl, /usr/sbin/iptables" > "/etc/sudoers.d/010_veo-dongle"
 chmod 0440 "/etc/sudoers.d/010_veo-dongle"
 
 

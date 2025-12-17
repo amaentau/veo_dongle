@@ -29,6 +29,11 @@ class ProvisioningManager {
       console.error('⚠️ Hotspot setup encountered an issue:', e.message);
     });
 
+    // 3. Setup Captive Portal Redirect (Port 80 -> 3000)
+    this.setupCaptivePortal().catch(e => {
+      console.warn('⚠️ Captive portal redirect failed (non-fatal):', e.message);
+    });
+
     console.log(`✅ Provisioning routes configured. Web server will start shortly.`);
     console.log(`   Connect to WiFi "${this.ssid}" and navigate to http://10.42.0.1:${this.port}`);
   }
@@ -57,9 +62,35 @@ class ProvisioningManager {
     }
   }
 
+  async setupCaptivePortal() {
+    console.log('🪤 Configuring Captive Portal redirection...');
+    // Redirect TCP port 80 on wlan0 to our port (default 3000)
+    // This allows devices to detect the portal when checking connectivity (e.g. generate_204)
+    try {
+      // First, flush existing rules to avoid duplicates (optional, might be aggressive)
+      // Instead, just append. If it duplicates, cleanup will handle or it's harmless for now.
+      // Better: Check if rule exists? 
+      // Simple: Just add.
+      await execPromise(`sudo iptables -t nat -A PREROUTING -i wlan0 -p tcp --dport 80 -j REDIRECT --to-port ${this.port}`);
+      console.log('✅ Captive Portal redirection active (Port 80 -> ' + this.port + ')');
+    } catch (e) {
+      // If sudo iptables fails (permission), we can't do much.
+      throw e;
+    }
+  }
+
   setupRoutes() {
     console.log('🛠️ Setting up provisioning routes...');
     
+    // Captive Portal Detection Helpers
+    // Android/Chrome
+    this.app.get('/generate_204', (req, res) => res.redirect('/'));
+    this.app.get('/gen_204', (req, res) => res.redirect('/'));
+    // Apple
+    this.app.get('/hotspot-detect.html', (req, res) => res.redirect('/'));
+    // Microsoft
+    this.app.get('/ncsi.txt', (req, res) => res.redirect('/'));
+
     this.app.get('/', (req, res) => {
       res.sendFile(path.join(__dirname, 'public', 'provisioning.html'));
     });
@@ -131,6 +162,14 @@ class ProvisioningManager {
         res.status(500).json({ error: e.message });
       }
     });
+
+    // Catch-all for Captive Portal (redirect unknown routes to /)
+    // Only do this after specific routes are defined
+    this.app.use((req, res, next) => {
+       // If it looks like a captive portal check or unknown host, redirect
+       // Simple approach: Redirect everything else to root
+       res.redirect('/');
+    });
   }
 
   async scanWifiNetworks() {
@@ -161,6 +200,9 @@ class ProvisioningManager {
         ssid = ssid.trim();
         if (!ssid) continue;
 
+        // Filter out our own hotspot SSID to avoid confusion
+        if (ssid === this.ssid) continue;
+
         // Deduplicate, keeping strongest signal
         if (seen.has(ssid)) continue;
         
@@ -178,6 +220,11 @@ class ProvisioningManager {
 
   async cleanupHotspot() {
     try {
+      console.log('🧹 Removing Captive Portal rules...');
+      try {
+        await execPromise(`sudo iptables -t nat -D PREROUTING -i wlan0 -p tcp --dport 80 -j REDIRECT --to-port ${this.port}`);
+      } catch (_) {} // Ignore if rule didn't exist
+
       console.log('🧹 Removing Hotspot profile...');
       // We use a timeout to ensure we don't hang if nmcli is unresponsive
       const cmd = `sudo nmcli connection delete "${this.hotspotName}"`;
