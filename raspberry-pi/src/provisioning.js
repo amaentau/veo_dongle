@@ -196,7 +196,7 @@ class ProvisioningManager {
     // Handle Coordinates
     const defaults = {
       1280: { play: { x: 63, y: 681 }, fullscreen: { x: 1136, y: 678 } },
-      1920: { play: { x: 77, y: 1039 }, fullscreen: { x: 1759, y: 1041 } },
+      1920: { play: { x: 87, y: 1032 }, fullscreen: { x: 1771, y: 1032 } },
       3840: { play: { x: 114, y: 2124 }, fullscreen: { x: 3643, y: 2122 } }
     };
 
