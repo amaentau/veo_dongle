@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fi">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Veo Dongle Setup</title>
+    <title>ESPA TV -käyttöönotto</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -158,31 +158,31 @@
 </head>
 <body>
     <div class="container">
-        <h1>Veo Dongle Setup</h1>
+        <h1>ESPA TV -käyttöönotto</h1>
         <form id="setupForm">
-            <div class="section-title">Veo Account</div>
+            <div class="section-title">Veo Tunnus</div>
             <div class="form-group">
-                <label for="email">Email</label>
-                <input type="email" id="email" name="email" required placeholder="your@email.com">
+                <label for="email">Sähköposti</label>
+                <input type="email" id="email" name="email" required placeholder="nimi@espa.fi">
             </div>
             <div class="form-group">
-                <label for="password">Password</label>
+                <label for="password">Salasana</label>
                 <input type="password" id="password" name="password" required placeholder="********">
             </div>
 
             <div class="wifi-header-row">
-                <div class="section-title">WiFi Connections</div>
-                <small id="scanStatus" style="color: #86868b; font-size: 12px; display: none;">Scanning...</small>
+                <div class="section-title">Langattomat verkot</div>
+                <small id="scanStatus" style="color: #86868b; font-size: 12px; display: none;">Etsitään verkkoja...</small>
             </div>
 
             <!-- Visible scan results -->
             <div id="scan-results-display" class="scan-results"></div>
             
             <div id="existing-wifi-list" style="margin-bottom: 15px; display: none;">
-                <label style="color: #666; font-size: 0.9em;">Currently Saved Networks:</label>
+                <label style="color: #666; font-size: 0.9em;">Tallennetut verkot:</label>
                 <div id="saved-networks" style="margin-top: 5px; font-size: 0.95em; color: #333;"></div>
                 <p style="font-size: 0.8em; color: #86868b; margin-top: 5px;">
-                    (Leave the fields below empty to keep these networks. Add a network below to configure a new one or update a password.)
+                    (Jätä kentät tyhjiksi säilyttääksesi nämä verkot. Lisää verkko alle määrittääksesi uuden tai päivittääksesi salasanan.)
                 </p>
             </div>
 
@@ -190,16 +190,16 @@
                 <!-- WiFi items will be added here -->
             </div>
             
-            <button type="button" id="addWifiBtn" class="add-wifi-btn">+ Add Network</button>
+            <button type="button" id="addWifiBtn" class="add-wifi-btn">+ Lisää verkko</button>
             <datalist id="wifi-scan-results"></datalist>
 
-            <div class="section-title">Device Settings</div>
+            <div class="section-title">Laitteen asetukset</div>
             <div class="form-group">
-                <label for="friendlyName">Friendly Name (e.g. Living Room)</label>
-                <input type="text" id="friendlyName" name="friendlyName" required placeholder="Living Room">
+                <label for="friendlyName">Laitteen nimi (esim. Makuuhuone)</label>
+                <input type="text" id="friendlyName" name="friendlyName" required placeholder="esim. Makuuhuone">
             </div>
 
-            <button type="submit" id="submitBtn" style="margin-top: 20px;">Save & Restart</button>
+            <button type="submit" id="submitBtn" style="margin-top: 20px;">Tallenna ja käynnistä uudelleen</button>
         </form>
     </div>
 
@@ -219,11 +219,11 @@
             div.className = 'wifi-item';
             div.innerHTML = `
                 <div class="wifi-item-header">
-                    <button type="button" class="remove-wifi">Remove</button>
+                    <button type="button" class="remove-wifi">Poista</button>
                 </div>
                 <div class="wifi-inputs">
-                    <input type="text" class="wifi-ssid" list="wifi-scan-results" placeholder="Network Name (SSID)">
-                    <input type="password" class="wifi-pass" placeholder="Password">
+                    <input type="text" class="wifi-ssid" list="wifi-scan-results" placeholder="Verkon nimi">
+                    <input type="password" class="wifi-pass" placeholder="Salasana">
                 </div>
             `;
             
@@ -259,7 +259,7 @@
                 const label = isConfigured ? `✓ ${net.ssid}` : net.ssid;
                 btn.textContent = `${label} (${net.signal}%)`;
                 
-                btn.title = isConfigured ? 'This network is already configured' : 'Click to use this network';
+                btn.title = isConfigured ? 'Tämä verkko on jo määritetty' : 'Klikkaa käyttääksesi tätä verkkoa';
                 
                 btn.onclick = () => {
                     const inputs = Array.from(document.querySelectorAll('.wifi-ssid'));
@@ -280,9 +280,9 @@
             
             const count = scanResults.length;
             if (count > 0) {
-                 scanStatus.textContent = `${count} network${count === 1 ? '' : 's'} found:`;
+                 scanStatus.textContent = `${count} verkkoa löytyi:`;
             } else {
-                 // Keep "Scanning..." or error if set elsewhere, or clear if empty list returned
+                 // Keep "Etsitään..." or error if set elsewhere, or clear if empty list returned
             }
         }
 
@@ -291,7 +291,7 @@
             const resultsDiv = document.getElementById('scan-results-display');
             
             scanStatus.style.display = 'inline';
-            scanStatus.textContent = 'Scanning...';
+            scanStatus.textContent = 'Etsitään verkkoja...';
             resultsDiv.innerHTML = '';
 
             try {
@@ -305,21 +305,21 @@
                     networks.forEach(net => {
                         const opt = document.createElement('option');
                         opt.value = net.ssid;
-                        opt.label = `Signal: ${net.signal}% ${net.security ? '('+net.security+')' : ''}`;
+                        opt.label = `Signaali: ${net.signal}% ${net.security ? '('+net.security+')' : ''}`;
                         scanList.appendChild(opt);
                     });
 
                     renderScanResults();
                     
                     if (scanResults.length === 0) {
-                        scanStatus.textContent = 'No networks found';
+                        scanStatus.textContent = 'Verkkoja ei löytynyt';
                     }
                 } else {
-                    scanStatus.textContent = 'Scan failed';
+                    scanStatus.textContent = 'Haku epäonnistui';
                 }
             } catch (e) {
                 console.error(e);
-                scanStatus.textContent = 'Scan error';
+                scanStatus.textContent = 'Haku epäonnistui';
             }
         }
 
@@ -362,7 +362,7 @@
             const btn = document.getElementById('submitBtn');
             const originalText = btn.textContent;
             btn.disabled = true;
-            btn.textContent = 'Saving...';
+            btn.textContent = 'Tallennetaan...';
 
             const formData = new FormData(e.target);
             const data = Object.fromEntries(formData.entries());
@@ -396,14 +396,14 @@
                 clearTimeout(timeoutId);
 
                 if (res.ok) {
-                    btn.textContent = 'Saved! Restarting...';
+                    btn.textContent = 'Tallennettu! Käynnistetään...';
                     btn.style.backgroundColor = '#34c759';
                     setTimeout(() => {
-                        alert('Configuration saved. The device will now restart and connect to WiFi.');
+                        alert('Asetukset tallennettu. Laite käynnistyy nyt uudelleen ja yhdistää WiFi-verkkoon.');
                     }, 500);
                 } else {
                     const errData = await res.json().catch(() => ({}));
-                    throw new Error(errData.error || 'Save failed');
+                    throw new Error(errData.error || 'Tallennus epäonnistui');
                 }
             } catch (err) {
                 const isNetworkError = 
@@ -414,17 +414,17 @@
 
                 if (isNetworkError) {
                      console.log('Network lost - assuming wifi switch');
-                     btn.textContent = 'Restarting...';
+                     btn.textContent = 'Käynnistetään...';
                      btn.style.backgroundColor = '#34c759';
                      setTimeout(() => {
-                        alert('Configuration saved. The device is restarting and connecting to the new WiFi network.');
+                        alert('Asetukset tallennettu. Laite käynnistyy uudelleen ja yhdistää uuteen WiFi-verkkoon.');
                     }, 500);
                     return;
                 }
 
                 console.error(err);
-                alert('Save Error: ' + err.message);
-                btn.textContent = 'Error! Try Again';
+                alert('Virhe tallennuksessa: ' + err.message);
+                btn.textContent = 'Virhe! Yritä uudelleen';
                 btn.style.backgroundColor = '#ff3b30';
                 btn.disabled = false;
                 setTimeout(() => {

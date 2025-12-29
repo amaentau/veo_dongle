@@ -105,10 +105,15 @@ class MockTableClient {
   async *listEntities({ queryOptions }) {
     let items = mockDb[this.tableName];
     if (queryOptions && queryOptions.filter) {
-      const match = queryOptions.filter.match(/PartitionKey eq '(.+?)'/);
-      if (match) {
-        const key = match[1].replace(/''/g, "'");
+      const pMatch = queryOptions.filter.match(/PartitionKey eq '(.+?)'/);
+      if (pMatch) {
+        const key = pMatch[1].replace(/''/g, "'");
         items = items.filter(i => i.partitionKey === key);
+      }
+      const rMatch = queryOptions.filter.match(/RowKey eq '(.+?)'/);
+      if (rMatch) {
+        const key = rMatch[1].replace(/''/g, "'");
+        items = items.filter(i => i.rowKey === key);
       }
     }
     for (const item of items) yield item;
@@ -223,7 +228,7 @@ app.post('/auth/send-otp', async (req, res) => {
       expires
     });
 
-    await sendEmail(email, 'Your Espa TV Code', `Your verification code is: ${otp}`);
+    await sendEmail(email, 'ESPA TV: Vahvistuskoodisi', `Tervetuloa ESPA TV -palveluun. Vahvistuskoodisi on: ${otp}`);
     return res.json({ ok: true, message: 'OTP sent' });
   } catch (err) {
     console.error('Send OTP error:', err);
@@ -521,7 +526,7 @@ app.post('/devices/announce', async (req, res) => {
     const deviceClient = getTableClient(TABLE_NAME_DEVICES);
     const permClient = getTableClient(TABLE_NAME_PERMISSIONS);
 
-    // Check if device already has a master
+    // 1. Check existing registration
     let existingDevice;
     try {
       existingDevice = await deviceClient.getEntity(deviceId, 'metadata');
@@ -529,21 +534,45 @@ app.post('/devices/announce', async (req, res) => {
       if (err.statusCode !== 404) throw err;
     }
 
-    if (existingDevice && existingDevice.masterEmail) {
-      // Already has a master, ignore announcement (don't overwrite)
-      return res.json({ ok: true, status: 'already_claimed' });
+    // 2. Handle Change of Hands / Takeover
+    if (existingDevice && existingDevice.masterEmail && existingDevice.masterEmail !== email) {
+      console.log(`🔄 Device ${deviceId} changing hands from ${existingDevice.masterEmail} to ${email}`);
+      
+      // Revoke ALL existing permissions for this device to ensure a clean slate
+      try {
+        const iter = permClient.listEntities({ 
+          queryOptions: { filter: `RowKey eq '${deviceId.replace(/'/g, "''")}'` } 
+        });
+        for await (const perm of iter) {
+          await permClient.deleteEntity(perm.partitionKey, perm.rowKey);
+          console.log(`🚫 Revoked permission for ${perm.partitionKey} on device ${deviceId}`);
+        }
+      } catch (e) {
+        console.warn(`⚠️ Failed to fully revoke old permissions for ${deviceId}:`, e.message);
+      }
     }
 
-    // Register Device
+    // 3. Register or Update Device Metadata
+    // We only overwrite a custom friendly name with a default one if the owner changed
+    let finalFriendlyName = friendlyName;
+    const isDefaultName = friendlyName.startsWith('ESPA-Pi-') || friendlyName === deviceId;
+    const ownerChanged = existingDevice && existingDevice.masterEmail !== email;
+
+    if (existingDevice && !ownerChanged && isDefaultName && existingDevice.friendlyName && !existingDevice.friendlyName.startsWith('ESPA-Pi-')) {
+      // Preserve the custom name already in Azure if the Pi sent a fallback default
+      finalFriendlyName = existingDevice.friendlyName;
+    }
+
     await deviceClient.upsertEntity({
       partitionKey: deviceId,
       rowKey: 'metadata',
-      friendlyName: friendlyName || deviceId,
+      friendlyName: finalFriendlyName || deviceId,
       masterEmail: email,
-      createdAt: new Date().toISOString()
+      createdAt: existingDevice ? existingDevice.createdAt : new Date().toISOString(),
+      lastAnnouncedAt: new Date().toISOString()
     });
 
-    // Auto-grant Master permission to the provisioning email
+    // 4. Ensure the new/current owner has Master permission
     await permClient.upsertEntity({
       partitionKey: email,
       rowKey: deviceId,
@@ -551,7 +580,10 @@ app.post('/devices/announce', async (req, res) => {
       addedBy: 'pi-announcement'
     });
 
-    return res.json({ ok: true, status: 'registered' });
+    return res.json({ 
+      ok: true, 
+      status: existingDevice ? (existingDevice.masterEmail === email ? 'updated' : 'transferred') : 'registered' 
+    });
   } catch (err) {
     console.error('POST /devices/announce error:', err);
     return res.status(500).json({ error: 'Internal Server Error' });

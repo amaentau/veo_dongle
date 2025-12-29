@@ -365,15 +365,15 @@
   <div id="claimModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:100; justify-content:center; align-items:center;">
     <div class="card" style="width:90%; max-width:400px;">
       <h2 style="margin-top:0; color:var(--primary-color);">Lisää laite</h2>
-      <p style="font-size:13px; color:var(--text-sub);">Yhdistä uusi Raspberry Pi tiliisi.</p>
+      <p style="font-size:13px; color:var(--text-sub);">Yhdistä uusi ESPA TV -soitin tiliisi.</p>
       
       <div class="form-group">
-        <label for="claimDeviceId">Laitteen ID (Veo-tunnus)</label>
+        <label for="claimDeviceId">Laitteen tunnus</label>
         <input id="claimDeviceId" type="text" placeholder="esim. rpi-1234">
       </div>
       <div class="form-group">
-        <label for="claimFriendlyName">Laitteen nimi (valinnainen)</label>
-        <input id="claimFriendlyName" type="text" placeholder="esim. Olohuone">
+        <label for="claimFriendlyName">Laitteen nimi</label>
+        <input id="claimFriendlyName" type="text" placeholder="esim. Makuuhuone">
       </div>
 
       <div class="status-msg" id="claimStatus"></div>
@@ -392,7 +392,7 @@
       <p style="font-size:13px; color:var(--text-sub);">Anna muille käyttäjille oikeus lisätä videoita laitteelle <strong id="shareDeviceName"></strong>.</p>
       
       <div class="form-group" style="display:flex; gap:8px;">
-        <input id="shareEmailInput" type="email" placeholder="kaverin@email.com" style="flex:1;">
+        <input id="shareEmailInput" type="email" placeholder="nimi@espa.fi" style="flex:1;">
         <button id="btnDoShare" style="width:auto; margin-top:0; padding:8px 16px;">Lisää</button>
       </div>
 
@@ -418,7 +418,7 @@
       
       <div class="form-group">
         <label for="renameFriendlyName">Laitteen nimi</label>
-        <input id="renameFriendlyName" type="text" placeholder="esim. Olohuone">
+        <input id="renameFriendlyName" type="text" placeholder="esim. Makuuhuone">
       </div>
 
       <div class="status-msg" id="renameStatus"></div>

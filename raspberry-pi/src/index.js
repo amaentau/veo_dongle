@@ -170,39 +170,100 @@ ID: ${id}
     }
   }
 
+  /**
+   * Check if internet connectivity is available
+   */
+  async checkInternet() {
+    try {
+      // Try to fetch BBS URL or a reliable public URL
+      const testUrl = this.config.azure?.bbsUrl || 'https://www.google.com';
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
+      await fetch(testUrl, { 
+        method: 'HEAD', 
+        signal: controller.signal,
+        mode: 'no-cors' 
+      });
+      
+      clearTimeout(timeoutId);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
+   * Wait for internet connectivity with timeout
+   */
+  async waitForInternet(timeoutMs = 60000, intervalMs = 5000) {
+    const startTime = Date.now();
+    console.log(`🌐 Waiting for internet connectivity (timeout: ${timeoutMs/1000}s)...`);
+    
+    while (Date.now() - startTime < timeoutMs) {
+      if (await this.checkInternet()) {
+        console.log('✅ Internet connectivity detected');
+        return true;
+      }
+      console.log(`⏳ Internet not available yet, retrying in ${intervalMs/1000}s...`);
+      await this.sleep(intervalMs);
+    }
+    
+    console.warn('⚠️ Internet connectivity check timed out');
+    return false;
+  }
+
   async announceToCloud() {
     if (!this.credentials || !this.credentials.email || !this.config.azure || !this.config.azure.bbsUrl) {
+      console.log('ℹ️ Skipping cloud announcement: Missing credentials or BBS URL');
       return;
     }
 
-    console.log(`📡 Announcing device ${this.deviceId} to cloud for user ${this.credentials.email}...`);
-    try {
-      // We'll use a special endpoint or just the claim endpoint if we had a token.
-      // Since the Pi doesn't have a user token yet (it only has Veo credentials),
-      // we'll update the BBS to allow a "Pi Announcement" using a shared secret or just trust if it matches provisioning.
-      
-      // For now, let's keep it simple: the Pi doesn't NEED to announce if the user "Claims" it.
-      // But to make it "Intuitive", we want the user to see it.
-      // Let's add an endpoint to BBS that accepts a "Provisioning Announcement"
-      
-      const res = await fetch(`${this.config.azure.bbsUrl}/devices/announce`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+    // Wait for internet before announcing, as we might have just booted after WiFi config
+    const hasInternet = await this.waitForInternet(60000); // Wait up to 1 minute
+    
+    if (!hasInternet) {
+      console.warn('⚠️ Proceeding with announcement despite no internet detection (may fail)');
+    }
+
+    const maxRetries = 5;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      console.log(`📡 Announcing device ${this.deviceId} to cloud (attempt ${attempt}/${maxRetries})...`);
+      try {
+        const res = await fetch(`${this.config.azure.bbsUrl}/devices/announce`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           deviceId: this.deviceId,
           email: this.credentials.email,
-          friendlyName: this.config.friendlyName || `Pi (${this.deviceId.slice(-4)})`
+          friendlyName: this.config.friendlyName || `ESPA-Pi-${this.deviceId.slice(-4)}`
         })
-      });
-      
-      if (res.ok) {
-        console.log('✅ Device announcement successful');
-      } else {
-        console.warn('⚠️ Device announcement failed (might be already claimed or BBS down)');
+        });
+        
+        if (res.ok) {
+          console.log('✅ Device announcement successful');
+          return true;
+        } else {
+          const errorText = await res.text().catch(() => 'No error text');
+          console.warn(`⚠️ Device announcement failed (Status: ${res.status}): ${errorText}`);
+          // If 4xx error (except 429), maybe don't retry as it might be a client error
+          if (res.status >= 400 && res.status < 500 && res.status !== 429) {
+            break;
+          }
+        }
+      } catch (err) {
+        console.error(`❌ Failed to announce device to cloud (attempt ${attempt}):`, err.message);
       }
-    } catch (err) {
-      console.error('❌ Failed to announce device to cloud:', err.message);
+
+      if (attempt < maxRetries) {
+        const delay = Math.min(2000 * Math.pow(2, attempt - 1), 30000);
+        console.log(`🔄 Retrying announcement in ${delay/1000}s...`);
+        await this.sleep(delay);
+      }
     }
+    
+    console.error('❌ All announcement attempts failed');
+    return false;
   }
 
   async initialize() {
@@ -216,6 +277,11 @@ ID: ${id}
         // Server listen is handled in start()
         return;
       }
+
+      // Announce device to cloud (non-blocking but we want it to happen)
+      this.announceToCloud().catch(err => {
+        console.error('Final failure in background announcement:', err.message);
+      });
 
       // First check for local Stream URL configuration
       if (process.env.STREAM_URL) {

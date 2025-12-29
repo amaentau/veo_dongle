@@ -133,7 +133,7 @@
         await sendOtp(email);
       }
     } catch (err) {
-      setAuthStatus('Palvelinvirhe. Yritä myöhemmin.');
+      setAuthStatus('Palvelimeen ei saada yhteyttä. Yritä hetken kuluttua uudelleen.');
       console.error(err);
     }
   });
@@ -153,7 +153,7 @@
       inputs.authOtp.value = '';
       inputs.authOtp.focus();
     } catch (err) {
-      setAuthStatus('Virhe koodin lähetyksessä.');
+      setAuthStatus('Virhe koodin lähetyksessä. Yritä uudelleen.');
     }
   }
 
