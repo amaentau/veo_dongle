@@ -319,11 +319,15 @@ ID: ${id}
 
       await this.updateSplash('Tarkistetaan verkkoyhteyttä...');
       
-      // Announce device to cloud (non-blocking but we want it to happen)
-      this.announceToCloud().catch(err => {
-        console.error('Final failure in background announcement:', err.message);
-      });
+      // 3. Announce device to cloud
+      // We MUST await this to ensure the cloud knows we are online before we try to fetch our config/URL
+      try {
+        await this.announceToCloud();
+      } catch (err) {
+        console.error('Final failure in device announcement:', err.message);
+      }
 
+      // 4. Fetch stream URL and coordinates
       // First check for local Stream URL configuration
       if (process.env.STREAM_URL) {
         this.streamUrl = process.env.STREAM_URL;
