@@ -77,6 +77,9 @@ else
   echo "[INFO] Starting application (Network check deferred to splash screen)."
 fi
 
+# Settling delay for system services (especially during cold boot)
+sleep 2
+
 cd "${APP_ROOT}"
 
 exec /usr/bin/env node src/index.js

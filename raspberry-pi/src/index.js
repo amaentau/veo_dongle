@@ -279,18 +279,33 @@ ID: ${id}
     console.log('Initializing Espa-TV Player...');
 
     try {
-      // 1. Setup server first (required for splash page)
+      // 1. Setup and start server first (required for splash page and API)
       this.setupServer();
+      await new Promise((resolve, reject) => {
+        this.server.on('error', (err) => {
+          if (err.code === 'EADDRINUSE') {
+            console.error(`❌ Port ${this.port} is already in use.`);
+            reject(err);
+          } else {
+            reject(err);
+          }
+        });
+        this.server.listen(this.port, () => {
+          console.log(`🔌 Server listening on port ${this.port}`);
+          resolve();
+        });
+      });
 
       // 2. Launch browser ASAP to show splash screen
       if (!this.needsProvisioning) {
         try {
           await this.launchBrowser();
-          const splashUrl = `http://localhost:${this.port}/splash.html`;
-          await this.page.goto(splashUrl);
+          const splashUrl = `http://127.0.0.1:${this.port}/splash.html`;
+          console.log(`🌐 Showing splash screen: ${splashUrl}`);
+          await this.page.goto(splashUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
           await this.updateSplash('Käynnistetään...');
         } catch (e) {
-          console.error('Failed to show splash screen:', e.message);
+          console.error('⚠️ Failed to show splash screen:', e.message);
         }
       }
 
@@ -690,7 +705,22 @@ ID: ${id}
     }
 
     this.logDebug('🔧 Launch options:', launchOptions);
-    this.browser = await puppeteer.launch(launchOptions);
+    
+    // Retry launch up to 3 times (useful during busy boot sequence)
+    let lastError = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        this.browser = await puppeteer.launch(launchOptions);
+        lastError = null;
+        break;
+      } catch (e) {
+        lastError = e;
+        console.warn(`⚠️ Browser launch attempt ${attempt} failed: ${e.message}`);
+        await this.sleep(2000);
+      }
+    }
+
+    if (lastError) throw lastError;
 
     // Use initial page instead of creating new one
     const pages = await this.browser.pages();
@@ -1254,10 +1284,7 @@ ID: ${id}
   async start() {
     try {
       await this.initialize();
-      console.log('🔌 Starting HTTP server...');
-      this.server.listen(this.port, () => {
-        console.log(`Server listening on port ${this.port}`);
-      });
+      // Server listen is now handled inside initialize() to support splash screen
     } catch (error) {
       console.error('Failed to start Espa-TV Player:', error);
       process.exit(1);
