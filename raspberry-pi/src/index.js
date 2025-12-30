@@ -176,19 +176,49 @@ ID: ${id}
    */
   async checkInternet() {
     try {
-      // Try to fetch BBS URL or a reliable public URL
-      const testUrl = this.config.azure?.bbsUrl || 'https://www.google.com';
+      // 1. Check if we have a valid IP address first (passive check)
+      const os = require('os');
+      const interfaces = os.networkInterfaces();
+      let hasIp = false;
+      
+      for (const name of Object.keys(interfaces)) {
+        // Ignore loopback and internal interfaces
+        if (name === 'lo' || name === 'docker0') continue;
+        
+        for (const info of interfaces[name]) {
+          if (!info.internal && (info.family === 'IPv4' || info.family === 'IPv6')) {
+            hasIp = true;
+            break;
+          }
+        }
+        if (hasIp) break;
+      }
+
+      if (!hasIp) return false;
+
+      // 2. Try DNS resolution (lighter than full HTTP request)
+      const dns = require('dns').promises;
+      try {
+        await dns.lookup('google.com');
+      } catch (e) {
+        return false;
+      }
+
+      // 3. Final verification with a lightweight HTTP check
+      const testUrl = this.config.azure?.bbsUrl || 'https://www.google.com/generate_204';
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
       
-      await fetch(testUrl, { 
-        method: 'HEAD', 
-        signal: controller.signal,
-        mode: 'no-cors' 
-      });
-      
-      clearTimeout(timeoutId);
-      return true;
+      try {
+        const response = await fetch(testUrl, { 
+          method: 'HEAD', 
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        return response.ok || response.status === 204;
+      } catch (e) {
+        return false;
+      }
     } catch (e) {
       return false;
     }
@@ -197,9 +227,12 @@ ID: ${id}
   /**
    * Wait for internet connectivity with timeout
    */
-  async waitForInternet(timeoutMs = 60000, intervalMs = 1000) {
+  async waitForInternet(timeoutMs = 60000, startIntervalMs = 2000) {
     const startTime = Date.now();
-    console.log(`🌐 Waiting for internet connectivity (timeout: ${timeoutMs/1000}s, interval: ${intervalMs}ms)...`);
+    let currentInterval = startIntervalMs;
+    let failCount = 0;
+
+    console.log(`🌐 Waiting for internet connectivity (timeout: ${timeoutMs/1000}s)...`);
     await this.updateSplash('Odotetaan verkkoyhteyttä...');
     
     while (Date.now() - startTime < timeoutMs) {
@@ -207,8 +240,15 @@ ID: ${id}
         console.log('✅ Internet connectivity detected');
         return true;
       }
-      console.log(`⏳ Internet not available yet, retrying in ${intervalMs/1000}s...`);
-      await this.sleep(intervalMs);
+
+      failCount++;
+      // Back off after 5 failures to give the network stack more breathing room
+      if (failCount > 5) {
+        currentInterval = 5000;
+      }
+
+      console.log(`⏳ Internet not available yet (check #${failCount}), retrying in ${currentInterval/1000}s...`);
+      await this.sleep(currentInterval);
     }
     
     console.warn('⚠️ Internet connectivity check timed out');
