@@ -15,6 +15,26 @@ class ProvisioningManager {
     this.password = 'espa12345';
   }
 
+  async isHotspotActive() {
+    try {
+      const { stdout } = await execPromise('nmcli -t -f NAME,TYPE connection show --active');
+      return stdout
+        .split('\n')
+        .some(line => line.trim() === `${this.hotspotName}:802-11-wireless`);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async cleanupCaptivePortalRules() {
+    try {
+      const rule = `-i wlan0 -p tcp --dport 80 -j REDIRECT --to-port ${this.port}`;
+      await execPromise(`sudo sh -c "while iptables -t nat -C PREROUTING ${rule} 2>/dev/null; do iptables -t nat -D PREROUTING ${rule}; done"`);
+    } catch (_) {
+      // non-fatal
+    }
+  }
+
   async start() {
     console.log('🚀 Starting Provisioning Mode...');
 
@@ -68,11 +88,10 @@ class ProvisioningManager {
     // Redirect TCP port 80 on wlan0 to our port (default 3000)
     // This allows devices to detect the portal when checking connectivity (e.g. generate_204)
     try {
-      // First, flush existing rules to avoid duplicates (optional, might be aggressive)
-      // Instead, just append. If it duplicates, cleanup will handle or it's harmless for now.
-      // Better: Check if rule exists? 
-      // Simple: Just add.
-      await execPromise(`sudo iptables -t nat -A PREROUTING -i wlan0 -p tcp --dport 80 -j REDIRECT --to-port ${this.port}`);
+      // Make it idempotent: add the rule only if it doesn't already exist.
+      // Use -I to ensure it takes effect even if other PREROUTING rules exist.
+      const rule = `-i wlan0 -p tcp --dport 80 -j REDIRECT --to-port ${this.port}`;
+      await execPromise(`sudo sh -c "iptables -t nat -C PREROUTING ${rule} 2>/dev/null || iptables -t nat -I PREROUTING 1 ${rule}"`);
       console.log('✅ Captive Portal redirection active (Port 80 -> ' + this.port + ')');
     } catch (e) {
       // If sudo iptables fails (permission), we can't do much.
@@ -232,9 +251,7 @@ class ProvisioningManager {
   async cleanupHotspot() {
     try {
       console.log('🧹 Removing Captive Portal rules...');
-      try {
-        await execPromise(`sudo iptables -t nat -D PREROUTING -i wlan0 -p tcp --dport 80 -j REDIRECT --to-port ${this.port}`);
-      } catch (_) {} 
+      await this.cleanupCaptivePortalRules();
 
       // Check if hotspot connection exists before trying to bring it down/delete
       let hotspotExists = false;
@@ -249,18 +266,9 @@ class ProvisioningManager {
           await execPromise(`sudo nmcli connection down "${this.hotspotName}"`);
         } catch (_) {}
 
-        console.log('🧹 Removing Hotspot profile...');
-        const cmd = `sudo nmcli connection delete "${this.hotspotName}"`;
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000));
-        await Promise.race([execPromise(cmd), timeoutPromise]);
-        console.log('✅ Hotspot profile removed');
-
-        // Ensure the device is explicitly managed by NetworkManager and re-scans
-        console.log('🧹 Ensuring wlan0 is managed and ready...');
-        try {
-          await execPromise('sudo nmcli device set wlan0 managed yes');
-          await execPromise('sudo nmcli device reapply wlan0 || true');
-        } catch (_) {}
+        // Keep the hotspot profile (autoconnect=no) to avoid churn and reduce risk of NM flapping.
+        // Next time provisioning starts, we can simply `nmcli con up` it again.
+        console.log('✅ Hotspot disconnected (profile kept)');
       } else {
         console.log('ℹ️ Hotspot profile already gone.');
       }
@@ -327,17 +335,6 @@ class ProvisioningManager {
       }
     }
 
-    // Clear reboot history to prevent immediate re-triggering of provisioning mode on next boot
-    try {
-      const historyPath = path.join(__dirname, '..', '.reboot_history');
-      if (fs.existsSync(historyPath)) {
-        fs.unlinkSync(historyPath);
-        console.log('🧹 Cleared reboot history');
-      }
-    } catch (e) {
-      console.warn('⚠️ Failed to clear reboot history:', e.message);
-    }
-
     // 3. Configure WiFi
     // Support new 'wifiNetworks' array or legacy single fields
     let networks = [];
@@ -358,6 +355,8 @@ class ProvisioningManager {
       };
 
       const escapeShellArg = (arg) => `'${String(arg).replace(/'/g, "'\\''")}'`;
+      const sanitizeName = (s) => String(s).replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);
+      const preferredOrder = [];
 
       for (const net of networks) {
         if (!net.ssid) continue;
@@ -366,60 +365,64 @@ class ProvisioningManager {
         try {
           const safeSsid = escapeShellArg(net.ssid);
           const safePass = net.password ? escapeShellArg(net.password) : '';
-          
-          // 1. Find and delete ALL existing profiles for this SSID to avoid "flapping"
-          console.log(`   Cleaning up existing profiles for SSID: ${net.ssid}`);
+
+          // Use a deterministic, app-owned connection name so we don't delete/override the user's existing profiles.
+          const conName = `EspaWiFi-${sanitizeName(net.ssid)}`;
+          const safeConName = escapeShellArg(conName);
+
+          // Create or update profile
+          let exists = false;
           try {
-            // Get all connection names that use this SSID
-            const { stdout: existingProfiles } = await execPromise(`nmcli -t -f NAME,802-11-wireless.ssid connection show`);
-            const profilesToDelete = existingProfiles.split('\n')
-              .filter(line => line.endsWith(`:${net.ssid}`))
-              .map(line => line.split(':')[0]);
+            await execWithTimeout(`nmcli -t -f NAME connection show ${safeConName}`, 3000);
+            exists = true;
+          } catch (_) {}
 
-            for (const profileName of profilesToDelete) {
-              console.log(`   Removing old profile: "${profileName}"`);
-              await execWithTimeout(`sudo nmcli connection delete ${escapeShellArg(profileName)}`);
+          if (!exists) {
+            let addCmd = `sudo nmcli con add type wifi ifname wlan0 con-name ${safeConName} ssid ${safeSsid}`;
+            if (safePass) {
+              addCmd += ` wifi-sec.key-mgmt wpa-psk wifi-sec.psk ${safePass}`;
             }
-          } catch (e) {
-            // If SSID search fails, try a simple delete by name as fallback
-            try { await execWithTimeout(`sudo nmcli connection delete ${safeSsid}`); } catch(_) {}
+            console.log(`   Creating profile: ${addCmd.replace(/psk '.*?'/, "psk '***'")}`);
+            await execWithTimeout(addCmd, 10000);
+          } else if (safePass) {
+            console.log(`   Updating password for profile ${conName}`);
+            await execWithTimeout(`sudo nmcli con modify ${safeConName} wifi-sec.key-mgmt wpa-psk wifi-sec.psk ${safePass}`, 5000);
           }
 
-          // 2. Add fresh profile
-          let addCmd = `sudo nmcli con add type wifi ifname wlan0 con-name ${safeSsid} ssid ${safeSsid}`;
-          if (safePass) {
-             addCmd += ` wifi-sec.key-mgmt wpa-psk wifi-sec.psk ${safePass}`;
-          }
-
-          console.log(`   Creating profile: ${addCmd.replace(/psk '.*?'/, "psk '***'")}`);
-          await execWithTimeout(addCmd, 10000);
-          
-          // 3. Configure all properties in one go for efficiency and reliability
-          const hostname = data.friendlyName ? data.friendlyName.replace(/[^a-zA-Z0-9-]/g, '-') : 'espa-tv-pi';
-          
+          // Keep changes minimal; let NetworkManager defaults handle DHCP/IPv6 unless user config says otherwise.
           const modCmd = [
-            `sudo nmcli con modify ${safeSsid}`,
+            `sudo nmcli con modify ${safeConName}`,
             `connection.autoconnect yes`,
             `connection.autoconnect-priority 100`,
             `ipv4.method auto`,
-            `ipv4.may-fail no`,
-            `ipv4.dhcp-client-id mac`,
-            `ipv4.dhcp-hostname ${hostname}`,
-            `ipv4.dhcp-timeout 30`,
-            `ipv6.method ignore`,
-            `802-11-wireless.cloned-mac-address preserve`
+            `ipv6.method auto`,
           ].join(' ');
-
-          console.log(`   Applying configurations for ${net.ssid}...`);
           await execWithTimeout(modCmd, 5000);
 
-          console.log(`✅ Configured ${net.ssid} successfully`);
+          preferredOrder.push({ ssid: net.ssid, conName });
+          console.log(`✅ Configured ${net.ssid} successfully (profile: ${conName})`);
           
         } catch (e) {
           console.error(`   ⚠️ Failed to configure ${net.ssid}:`, e.message);
         }
       }
       console.log('✅ WiFi configuration complete');
+
+      // Best-effort: bring hotspot down and try to connect immediately (reduces "it never comes back" cases).
+      try {
+        await this.cleanupHotspot();
+      } catch (_) {}
+
+      for (const item of preferredOrder) {
+        try {
+          console.log(`📶 Attempting to connect to ${item.ssid}...`);
+          await execWithTimeout(`sudo nmcli con up ${escapeShellArg(item.conName)}`, 20000);
+          console.log(`✅ Connected to ${item.ssid}`);
+          break;
+        } catch (e) {
+          console.warn(`⚠️ Connect attempt failed for ${item.ssid}:`, e.message);
+        }
+      }
     }
   }
 }

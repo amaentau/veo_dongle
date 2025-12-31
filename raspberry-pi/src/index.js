@@ -347,13 +347,18 @@ ID: ${id}
     console.log('Initializing Espa-TV Player...');
 
     try {
-      // 0. Network Sanity: Ensure no leftover hotspot is running
-      // This prevents the device from being "stuck" in AP mode if it crashed during provisioning
+      // 0. Network sanity: only clean up hotspot/captive-portal if it's actually active.
+      // Avoid running disruptive NetworkManager operations on every boot.
       if (!this.needsProvisioning) {
         try {
-          console.log('🧹 Cleaning up any leftover hotspot state...');
           const pm = new ProvisioningManager(this.app, this.port);
-          await pm.cleanupHotspot();
+          // Always remove any leftover captive-portal redirect rule (safe + idempotent),
+          // even if the hotspot isn't active (covers interrupted provisioning runs).
+          await pm.cleanupCaptivePortalRules();
+          if (await pm.isHotspotActive()) {
+            console.log('🧹 Hotspot still active; cleaning up...');
+            await pm.cleanupHotspot();
+          }
         } catch (e) {
           // Ignore failures here
         }
@@ -489,9 +494,6 @@ ID: ${id}
       }
 
       console.log(`✅ Espa-TV Player ready. Access at http://localhost:${this.port}`);
-
-      // Clear reboot history after successful startup
-      this.clearRebootHistory();
     } catch (error) {
       console.error('❌ Initialization failed:', error.message);
       console.log('Starting recovery mode...');
@@ -511,17 +513,6 @@ ID: ${id}
     }
   }
 
-
-  clearRebootHistory() {
-    const scriptPath = path.join(__dirname, '..', 'scripts', 'reboot-check.js');
-    exec(`node "${scriptPath}" --clear`, (error, stdout, stderr) => {
-      if (error) {
-        console.warn(`⚠️ Failed to clear reboot history: ${error.message}`);
-        return;
-      }
-      if (stdout) console.log(stdout.trim());
-    });
-  }
 
   setupRecoveryMode() {
     console.log('Setting up recovery mode...');

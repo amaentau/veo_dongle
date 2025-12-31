@@ -354,10 +354,19 @@ if systemctl list-unit-files | grep -q NetworkManager.service; then
   systemctl enable NetworkManager.service || true
 fi
 
-# Set WiFi country code to FI (Finland) for better frequency compatibility
-if command -v raspi-config >/dev/null 2>&1; then
-  info "Setting WiFi country to FI"
-  raspi-config nonint do_wifi_country FI || true
+# WiFi country code:
+# Do NOT force a hard-coded country, as the wrong regulatory domain can make WiFi unreliable
+# (channel restrictions / DFS behavior varies by country). If you want to set it, provide
+# WIFI_COUNTRY=XX (e.g. US, GB, DE) or put `wifi.country` into config.json.
+WIFI_COUNTRY="${WIFI_COUNTRY:-}"
+if [[ -z "${WIFI_COUNTRY}" ]] && [[ -f "${CONFIG_JSON}" ]] && command -v jq >/dev/null 2>&1; then
+  WIFI_COUNTRY="$(jq -r '.wifi.country // empty' "${CONFIG_JSON}" 2>/dev/null || true)"
+fi
+if [[ -n "${WIFI_COUNTRY}" ]] && command -v raspi-config >/dev/null 2>&1; then
+  info "Setting WiFi country to ${WIFI_COUNTRY}"
+  raspi-config nonint do_wifi_country "${WIFI_COUNTRY}" || true
+else
+  info "Leaving WiFi country unchanged (set WIFI_COUNTRY=XX to configure)"
 fi
 
 # We DISABLE wait-online services because they can block the entire boot process
@@ -452,32 +461,6 @@ chown "${SERVICE_USER}:${SERVICE_USER}" "${SERVICE_HOME}/.xinitrc"
 chmod +x "${SERVICE_HOME}/.xinitrc"
 
 success "Setup complete! You can launch the kiosk manually via ${APP_ROOT}/scripts/start-kiosk.sh."
-
-info "Installing early-boot reboot monitor service"
-MONITOR_SERVICE_FILE="/etc/systemd/system/espa-tv-reboot-monitor.service"
-
-cat >"${MONITOR_SERVICE_FILE}" <<EOF
-[Unit]
-Description=ESPA TV Reboot Monitor (Early Boot)
-DefaultDependencies=no
-Before=network-pre.target
-Wants=network-pre.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/node ${APP_ROOT}/scripts/reboot-check.js
-RemainAfterExit=yes
-User=${SERVICE_USER}
-Group=${SERVICE_USER}
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=sysinit.target
-EOF
-
-systemctl enable espa-tv-reboot-monitor.service
-success "Early-boot monitor service installed."
 
 info "Installing systemd service for ESPA TV"
 SERVICE_FILE="/etc/systemd/system/espa-tv.service"

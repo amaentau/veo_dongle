@@ -192,8 +192,9 @@ create_systemd_service() {
   cat >"${systemd_unit}" <<EOF
 [Unit]
 Description=Espa-TV Player Kiosk (Xorg + Chromium)
-After=network-online.target
-Wants=network-online.target
+# App handles its own connectivity checks; avoid depending on wait-online units.
+After=network.target NetworkManager.service
+Wants=network.target NetworkManager.service
 # Removed local-fs.target dependency to avoid fsck conflicts
 ConditionPathExists=${APP_ROOT}/src/index.js
 
