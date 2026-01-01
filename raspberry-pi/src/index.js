@@ -390,7 +390,7 @@ ID: ${id}
       failCount++;
 
       // Enhanced diagnostics at different intervals (adjusted for two-phase approach)
-      if ((failCount === 2 && !basicConnectivityEstablished) || (failCount === 1 && basicConnectivityEstablished)) {
+      if ((failCount === 3 && !basicConnectivityEstablished) || (failCount === 2 && basicConnectivityEstablished)) {
         console.log('🔍 Gathering detailed network diagnostics...');
         try {
           // Check NetworkManager status
@@ -402,10 +402,17 @@ ID: ${id}
             }
           });
 
-          // Check WiFi connection details
+          // Check WiFi signal and connection details
           exec('iwconfig wlan0 2>/dev/null || iwconfig 2>/dev/null | head -5', (err, stdout) => {
             if (!err && stdout) {
               console.log(`📶 WiFi status: ${stdout.trim().replace(/\n/g, ' | ')}`);
+            }
+          });
+
+          // Check current WiFi signal strength
+          exec('nmcli -t -f SSID,SIGNAL dev wifi | head -3', (err, stdout) => {
+            if (!err && stdout) {
+              console.log(`📊 WiFi networks: ${stdout.trim().replace(/\n/g, ' | ')}`);
             }
           });
         } catch (e) {
@@ -413,44 +420,45 @@ ID: ${id}
         }
       }
 
-      // Network recovery attempts - CONSERVATIVE to prevent pollution
+      // Network recovery attempts - BALANCED approach
       if (!basicConnectivityEstablished && !recoveryInProgress) {
-        // Phase 1: Basic connectivity recovery - only after prolonged failure
-        if (failCount === 10) {  // Much later - after ~50 seconds of failures
+        // Phase 1: Basic connectivity recovery - reasonable timing for genuine issues
+        if (failCount === 6) {  // After ~30 seconds of continuous failures
           recoveryInProgress = true;
-          console.log('🔄 Attempting gentle WiFi reconnection for basic connectivity...');
+          console.log('🔄 Attempting WiFi recovery for basic connectivity...');
           try {
-            // Check if wlan0 is already connected before attempting reconnection
-            exec('nmcli -t -f DEVICE,STATE device status | grep "^wlan0:connected"', (err, stdout) => {
-              if (!err && stdout.trim()) {
-                console.log('✅ wlan0 already connected, skipping reconnection');
+            // First try gentle reapply (safe)
+            exec('sudo nmcli device reapply wlan0 2>/dev/null', (err, stdout) => {
+              if (!err) {
+                console.log('✅ WiFi reapply successful');
                 recoveryInProgress = false;
                 return;
               }
 
-              // Use reapply instead of disconnect/connect cycle to avoid leaving device disconnected
-              exec('sudo nmcli device reapply wlan0 2>/dev/null || echo "Reapply failed"', (err2) => {
+              // If reapply fails, try connection up (also safe)
+              console.log('🔄 Reapply failed, trying connection up...');
+              exec('sudo nmcli connection up "$(nmcli -t -f NAME,TYPE connection show --active | grep wifi | head -1 | cut -d: -f1)" 2>/dev/null', (err2) => {
                 recoveryInProgress = false;
                 if (err2) {
-                  console.log(`⚠️ WiFi reapply failed: ${err2.message}`);
+                  console.log(`⚠️ WiFi connection up failed: ${err2.message}`);
                 } else {
-                  console.log('✅ WiFi reapply attempted');
+                  console.log('✅ WiFi connection up attempted');
                 }
               });
             });
           } catch (e) {
             recoveryInProgress = false;
-            console.log('⚠️ WiFi reconnection check error');
+            console.log('⚠️ WiFi recovery error');
           }
         }
 
-        // NetworkManager reload ONLY as absolute last resort
-        if (failCount === 20) {  // Very late - after ~100 seconds
+        // NetworkManager reload as secondary recovery
+        if (failCount === 12) {  // After ~60 seconds of continuous failures
           recoveryInProgress = true;
-          console.log('🚨 Last resort: attempting NetworkManager reload (preserves connections)...');
+          console.log('🔄 Attempting NetworkManager reload to refresh connections...');
           try {
             // Use reload instead of restart to preserve connection state
-            exec('sudo nmcli general reload 2>/dev/null || sudo systemctl reload NetworkManager 2>/dev/null || echo "Reload not supported"', (err) => {
+            exec('sudo nmcli general reload 2>/dev/null || echo "NM reload not supported"', (err) => {
               recoveryInProgress = false;
               if (err) {
                 console.log(`⚠️ NetworkManager reload failed: ${err.message}`);
@@ -464,9 +472,9 @@ ID: ${id}
           }
         }
 
-        // Conservative backoff for basic connectivity phase - avoid overwhelming the system
-        if (failCount > 5) {
-          currentInterval = Math.min(currentInterval * 1.1, 8000); // Max 8s, slower growth
+        // Balanced backoff for basic connectivity phase
+        if (failCount > 4) {
+          currentInterval = Math.min(currentInterval * 1.2, 6000); // Max 6s, moderate growth
         }
       } else {
         // Phase 2: BBS connectivity - less aggressive recovery, focus on waiting
