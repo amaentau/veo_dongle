@@ -209,22 +209,49 @@ ID: ${id}
         return false;
       }
 
-      // 3. Final verification with a lightweight HTTP check
-      const testUrl = this.config.azure?.bbsUrl || 'https://www.google.com/generate_204';
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-      
-      try {
-        const response = await fetch(testUrl, { 
-          method: 'HEAD', 
-          signal: controller.signal,
-          headers: { 'Cache-Control': 'no-cache' }
-        });
-        clearTimeout(timeoutId);
-        return response.ok || response.status === 204 || response.status === 302;
-      } catch (e) {
+      // 3. Verify BBS URL accessibility (required for app functionality)
+      if (!this.config.azure?.bbsUrl) {
+        console.warn('⚠️ No BBS URL configured - cannot verify cloud connectivity');
         return false;
       }
+
+      // Test BBS URL specifically with retries (Azure free tier may be slow)
+      const maxBbsRetries = 3;
+      for (let attempt = 1; attempt <= maxBbsRetries; attempt++) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s for Azure free tier
+
+        try {
+          console.log(`🌐 Testing BBS connectivity (attempt ${attempt}/${maxBbsRetries}): ${this.config.azure.bbsUrl}`);
+          const response = await fetch(this.config.azure.bbsUrl, {
+            method: 'HEAD',
+            signal: controller.signal,
+            headers: {
+              'Cache-Control': 'no-cache',
+              'User-Agent': 'Espa-TV/1.0'
+            }
+          });
+          clearTimeout(timeoutId);
+
+          if (response.ok || response.status === 204 || response.status === 302) {
+            console.log('✅ BBS connectivity confirmed');
+            return true;
+          } else {
+            console.warn(`⚠️ BBS returned status ${response.status}`);
+          }
+        } catch (e) {
+          console.warn(`⚠️ BBS connectivity attempt ${attempt} failed: ${e.message}`);
+          clearTimeout(timeoutId);
+        }
+
+        // Wait before retry (except on last attempt)
+        if (attempt < maxBbsRetries) {
+          await this.sleep(2000);
+        }
+      }
+
+      console.warn('❌ BBS connectivity check failed after all retries');
+      return false;
     } catch (e) {
       return false;
     }
