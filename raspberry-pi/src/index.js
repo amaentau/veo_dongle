@@ -402,7 +402,7 @@ ID: ${id}
 
     // Wait for internet before announcing, as we might have just booted after WiFi config
     if (!skipWait) {
-      const hasInternet = await this.waitForInternet(60000); // Wait up to 1 minute
+      const hasInternet = await this.waitForInternet(); // Use default 5-minute timeout for BBS connectivity
       if (!hasInternet) {
         console.warn('⚠️ Cannot announce device: No internet connectivity detected');
         return false;
@@ -519,7 +519,7 @@ ID: ${id}
       
       // 3. Wait for Internet and Announce device to cloud
       // We MUST ensure internet is available and announcement is done before we try to fetch our config/URL
-      const internetReady = await this.waitForInternet(60000);
+      const internetReady = await this.waitForInternet(); // Use default 5-minute timeout for BBS connectivity
       if (!internetReady) {
         throw new Error('Verkkoyhteyttä ei saatu muodostettua. Pilvisynkronointi ei ole mahdollista.');
       }
