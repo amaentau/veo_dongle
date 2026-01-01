@@ -235,14 +235,26 @@ ID: ${id}
 
       console.log(`🔍 Testing BBS connectivity: ${this.config.azure.bbsUrl}`);
 
-      // Test BBS URL with generous retries (Azure free tier + WiFi unreliability)
-      const maxBbsRetries = 5;
+      // First check if BBS domain can be resolved (separate from general DNS check)
+      try {
+        const url = new URL(this.config.azure.bbsUrl);
+        console.log(`🔍 Resolving BBS domain: ${url.hostname}`);
+        const dns = require('dns').promises;
+        await dns.lookup(url.hostname);
+        console.log(`✅ BBS domain resolved: ${url.hostname}`);
+      } catch (e) {
+        console.log(`❌ BBS domain resolution failed: ${e.message}`);
+        return false;
+      }
+
+      // Test BBS URL with generous retries for Azure free tier cold starts
+      const maxBbsRetries = 8;
       for (let attempt = 1; attempt <= maxBbsRetries; attempt++) {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s per attempt
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s per attempt for slow Azure cold starts
 
         try {
-          console.log(`🌐 BBS connectivity attempt ${attempt}/${maxBbsRetries} (20s timeout)...`);
+          console.log(`🌐 BBS connectivity attempt ${attempt}/${maxBbsRetries} (30s timeout)...`);
           const response = await fetch(this.config.azure.bbsUrl, {
             method: 'HEAD',
             signal: controller.signal,
@@ -264,10 +276,11 @@ ID: ${id}
           clearTimeout(timeoutId);
         }
 
-        // Wait before retry (except on last attempt)
+        // Network-friendly backoff: longer initial waits, shorter between retries
         if (attempt < maxBbsRetries) {
-          const waitTime = Math.min(3000 * attempt, 10000); // Progressive backoff: 3s, 6s, 9s, 12s
-          console.log(`⏳ Waiting ${waitTime/1000}s before retry...`);
+          // First few attempts: give time for cold start, later attempts: faster retries
+          const waitTime = attempt <= 3 ? 5000 : 2000; // 5s for first 3, 2s for rest
+          console.log(`⏳ Waiting ${waitTime/1000}s before retry (attempt ${attempt + 1})...`);
           await this.sleep(waitTime);
         }
       }
@@ -283,13 +296,14 @@ ID: ${id}
   /**
    * Wait for internet connectivity with detailed diagnostics
    */
-  async waitForInternet(timeoutMs = 120000, startIntervalMs = 3000) { // Increased timeout to 2 minutes
+  async waitForInternet(timeoutMs = 300000, startIntervalMs = 3000) { // Increased timeout to 5 minutes for slow BBS cold starts
     const startTime = Date.now();
     let currentInterval = startIntervalMs;
     let failCount = 0;
 
     console.log(`🌐 Starting network connectivity check (BBS required, timeout: ${timeoutMs/1000}s)`);
     console.log(`📊 BBS URL: ${this.config.azure?.bbsUrl || 'NOT CONFIGURED'}`);
+    console.log(`⏱️ Will retry BBS connectivity up to 8 times with 30s timeout each`);
     await this.updateSplash('Odotetaan verkkoyhteyttä...');
 
     while (Date.now() - startTime < timeoutMs) {
