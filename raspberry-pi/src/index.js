@@ -150,38 +150,35 @@ class EspaTvPlayer {
       };
     }
 
-    // Check HDMI connectivity
+    // Check HDMI connectivity FIRST - no display means ALWAYS provision
     const hdmiStatus = await this.hdmiMonitor.checkHDMI();
     console.log(`🖥️ HDMI status: ${hdmiStatus.connected ? 'connected' : 'disconnected'} (${hdmiStatus.method}, ${(hdmiStatus.confidence * 100).toFixed(1)}% confidence)`);
 
-    // Use state manager to make final decision
-    const decision = this.stateManager.shouldTriggerProvisioning({
-      hasConfig,
-      hasCredentials,
-      hdmiConnected: hdmiStatus.connected,
-      forceProvisioning: false,
-      headlessOverride: this.hdmiMonitor.isHeadlessOverrideEnabled()
-    });
-
-    if (decision.shouldProvision) {
-      console.log(`⚠️ Provisioning required: ${decision.reason} (confidence: ${(decision.confidence * 100).toFixed(1)}%)`);
-      this.stateManager.recordProvisioningTrigger('hdmi_based_provisioning', {
+    // HDMI DISCONNECTION TAKES ABSOLUTE PRECEDENCE
+    // If no display is connected, ALWAYS enter provisioning mode
+    if (!hdmiStatus.connected && hdmiStatus.confidence > 0.5) {
+      console.log('⚠️ No HDMI display detected - entering provisioning mode for reconfiguration');
+      this.stateManager.recordProvisioningTrigger('hdmi_disconnected_absolute', {
         hdmiStatus,
-        decision
+        reason: 'no_display_requires_provisioning'
       });
-    } else {
-      console.log(`✅ Normal operation: ${decision.reason} (confidence: ${(decision.confidence * 100).toFixed(1)}%)`);
-      if (decision.waitForRetry) {
-        console.log('⏳ HDMI disconnected - waiting for potential reconnection before triggering provisioning...');
-      }
+      return {
+        needsProvisioning: true,
+        reason: 'hdmi_disconnected_absolute',
+        confidence: 0.95,
+        hdmiStatus,
+        waitForRetry: false
+      };
     }
 
+    // HDMI connected or uncertain - proceed with normal operation
+    console.log('✅ HDMI display detected or uncertain - proceeding with normal operation');
     return {
-      needsProvisioning: decision.shouldProvision,
-      reason: decision.reason,
-      confidence: decision.confidence,
+      needsProvisioning: false,
+      reason: 'hdmi_connected_normal_operation',
+      confidence: 0.9,
       hdmiStatus,
-      waitForRetry: decision.waitForRetry || false
+      waitForRetry: false
     };
   }
 
