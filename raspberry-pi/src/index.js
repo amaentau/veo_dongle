@@ -179,50 +179,70 @@ ID: ${id}
    */
   async checkInternet() {
     try {
+      console.log('🔍 Checking network connectivity...');
+
+      // 1. Check IP address assignment
       const os = require('os');
       const interfaces = os.networkInterfaces();
       let hasIp = false;
-      
+      let activeInterfaces = [];
+
       for (const name of Object.keys(interfaces)) {
         if (name === 'lo' || name === 'docker0') continue;
         const iface = interfaces[name];
         if (!iface) continue;
+
+        let ifaceHasIp = false;
         for (const info of iface) {
-          if (!info.internal && (info.family === 'IPv4' || info.family === 'IPv6')) {
-            hasIp = true;
+          if (!info.internal && (info.family === 'IPv4' || info.family === 'IPv6') && info.address !== '127.0.0.1') {
+            ifaceHasIp = true;
+            activeInterfaces.push(`${name}: ${info.address}`);
             break;
           }
         }
-        if (hasIp) break;
+
+        if (ifaceHasIp) {
+          hasIp = true;
+        }
       }
 
-      if (!hasIp) return false;
+      if (!hasIp) {
+        console.log('❌ No IP address assigned to network interfaces');
+        return false;
+      }
 
-      // 2. Try DNS resolution (multiple targets for resilience)
+      console.log(`✅ IP addresses found: ${activeInterfaces.join(', ')}`);
+
+      // 2. Try DNS resolution (required for BBS connectivity)
+      console.log('🔍 Testing DNS resolution...');
       const dns = require('dns').promises;
       try {
         await Promise.any([
           dns.lookup('google.com'),
           dns.lookup('cloudflare.com')
         ]);
+        console.log('✅ DNS resolution working');
       } catch (e) {
+        console.log(`❌ DNS resolution failed: ${e.message}`);
         return false;
       }
 
-      // 3. Verify BBS URL accessibility (required for app functionality)
+      // 3. Verify BBS connectivity (REQUIRED for app functionality)
       if (!this.config.azure?.bbsUrl) {
-        console.warn('⚠️ No BBS URL configured - cannot verify cloud connectivity');
+        console.log('❌ No BBS URL configured - application cannot function without cloud service');
         return false;
       }
 
-      // Test BBS URL specifically with retries (Azure free tier may be slow)
-      const maxBbsRetries = 3;
+      console.log(`🔍 Testing BBS connectivity: ${this.config.azure.bbsUrl}`);
+
+      // Test BBS URL with generous retries (Azure free tier + WiFi unreliability)
+      const maxBbsRetries = 5;
       for (let attempt = 1; attempt <= maxBbsRetries; attempt++) {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s for Azure free tier
+        const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s per attempt
 
         try {
-          console.log(`🌐 Testing BBS connectivity (attempt ${attempt}/${maxBbsRetries}): ${this.config.azure.bbsUrl}`);
+          console.log(`🌐 BBS connectivity attempt ${attempt}/${maxBbsRetries} (20s timeout)...`);
           const response = await fetch(this.config.azure.bbsUrl, {
             method: 'HEAD',
             signal: controller.signal,
@@ -234,77 +254,129 @@ ID: ${id}
           clearTimeout(timeoutId);
 
           if (response.ok || response.status === 204 || response.status === 302) {
-            console.log('✅ BBS connectivity confirmed');
+            console.log(`✅ BBS connectivity confirmed (HTTP ${response.status})`);
             return true;
           } else {
-            console.warn(`⚠️ BBS returned status ${response.status}`);
+            console.log(`⚠️ BBS returned HTTP ${response.status} - retrying...`);
           }
         } catch (e) {
-          console.warn(`⚠️ BBS connectivity attempt ${attempt} failed: ${e.message}`);
+          console.log(`⚠️ BBS attempt ${attempt} failed: ${e.message}`);
           clearTimeout(timeoutId);
         }
 
         // Wait before retry (except on last attempt)
         if (attempt < maxBbsRetries) {
-          await this.sleep(2000);
+          const waitTime = Math.min(3000 * attempt, 10000); // Progressive backoff: 3s, 6s, 9s, 12s
+          console.log(`⏳ Waiting ${waitTime/1000}s before retry...`);
+          await this.sleep(waitTime);
         }
       }
 
-      console.warn('❌ BBS connectivity check failed after all retries');
+      console.log('❌ BBS connectivity check failed after all retries');
       return false;
     } catch (e) {
+      console.log(`❌ Network check error: ${e.message}`);
       return false;
     }
   }
 
   /**
-   * Wait for internet connectivity with timeout
+   * Wait for internet connectivity with detailed diagnostics
    */
-  async waitForInternet(timeoutMs = 60000, startIntervalMs = 2000) {
+  async waitForInternet(timeoutMs = 120000, startIntervalMs = 3000) { // Increased timeout to 2 minutes
     const startTime = Date.now();
     let currentInterval = startIntervalMs;
     let failCount = 0;
 
-    console.log(`🌐 Waiting for internet connectivity (timeout: ${timeoutMs/1000}s)...`);
+    console.log(`🌐 Starting network connectivity check (BBS required, timeout: ${timeoutMs/1000}s)`);
+    console.log(`📊 BBS URL: ${this.config.azure?.bbsUrl || 'NOT CONFIGURED'}`);
     await this.updateSplash('Odotetaan verkkoyhteyttä...');
-    
+
     while (Date.now() - startTime < timeoutMs) {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      console.log(`🔄 Network check #${failCount + 1} (${elapsed}s elapsed)...`);
+
       if (await this.checkInternet()) {
-        console.log('✅ Internet connectivity detected');
+        const totalTime = Math.round((Date.now() - startTime) / 1000);
+        console.log(`✅ Network connectivity established after ${totalTime}s`);
         return true;
       }
 
       failCount++;
 
-      // Periodic diagnostics logging
-      if (failCount % 5 === 0) {
+      // Enhanced diagnostics at different intervals
+      if (failCount === 2) {
+        console.log('🔍 Gathering detailed network diagnostics...');
         try {
+          // Check NetworkManager status
           exec('nmcli -t -f DEVICE,STATE,CONNECTION device status', (err, stdout) => {
-            if (!err && stdout) console.log(`⏳ [Diagnostics] ${stdout.trim().replace(/\n/g, ' | ')}`);
+            if (!err && stdout) {
+              console.log(`📊 NetworkManager devices: ${stdout.trim().replace(/\n/g, ' | ')}`);
+            } else {
+              console.log('⚠️ NetworkManager status check failed');
+            }
           });
-        } catch (_) {}
+
+          // Check WiFi connection details
+          exec('iwconfig wlan0 2>/dev/null || iwconfig 2>/dev/null | head -5', (err, stdout) => {
+            if (!err && stdout) {
+              console.log(`📶 WiFi status: ${stdout.trim().replace(/\n/g, ' | ')}`);
+            }
+          });
+        } catch (e) {
+          console.log('⚠️ Diagnostics gathering failed');
+        }
       }
 
-      // If we've waited ~20s and still no IP, try to nudge the hardware/NetworkManager
-      if (failCount === 7) {
-        console.log('🔄 Connectivity stall detected - attempting to nudge wlan0...');
+      // Network recovery attempts at different stages
+      if (failCount === 3) {
+        console.log('🔄 Attempting WiFi reconnection...');
         try {
-          exec('sudo nmcli device reapply wlan0 || sudo nmcli device connect wlan0', (err) => {
-             if (err) console.warn('⚠️ Nudge failed:', err.message);
+          exec('sudo nmcli device disconnect wlan0 2>/dev/null; sleep 2; sudo nmcli device connect wlan0', (err) => {
+            if (err) {
+              console.log(`⚠️ WiFi reconnection failed: ${err.message}`);
+            } else {
+              console.log('✅ WiFi reconnection attempted');
+            }
           });
-        } catch (e) {}
+        } catch (e) {
+          console.log('⚠️ WiFi reconnection error');
+        }
       }
 
-      // Back off after some failures
-      if (failCount > 5) {
-        currentInterval = 5000;
+      if (failCount === 6) {
+        console.log('🔄 Attempting NetworkManager restart...');
+        try {
+          exec('sudo systemctl restart NetworkManager', (err) => {
+            if (err) {
+              console.log(`⚠️ NetworkManager restart failed: ${err.message}`);
+            } else {
+              console.log('✅ NetworkManager restart attempted');
+            }
+          });
+        } catch (e) {
+          console.log('⚠️ NetworkManager restart error');
+        }
       }
 
-      console.log(`⏳ Internet not available yet (check #${failCount}), retrying in ${currentInterval/1000}s...`);
+      // Progressive backoff with longer intervals
+      if (failCount > 3) {
+        currentInterval = Math.min(currentInterval * 1.5, 8000); // Max 8s interval
+      }
+
+      const remaining = Math.round((timeoutMs - (Date.now() - startTime)) / 1000);
+      console.log(`⏳ Network check failed, retrying in ${currentInterval/1000}s (${remaining}s remaining)...`);
       await this.sleep(currentInterval);
     }
-    
-    console.warn('⚠️ Internet connectivity check timed out');
+
+    const totalTime = Math.round((Date.now() - startTime) / 1000);
+    console.log(`❌ Network connectivity check timed out after ${totalTime}s`);
+    console.log('💡 Possible issues:');
+    console.log('   - WiFi signal weak or unstable');
+    console.log('   - BBS service temporarily unavailable');
+    console.log('   - DNS resolution problems');
+    console.log('   - NetworkManager configuration issues');
+
     return false;
   }
 
