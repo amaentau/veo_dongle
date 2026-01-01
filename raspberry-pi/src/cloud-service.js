@@ -202,7 +202,6 @@ class CloudService {
 
     // BBS HTTP endpoint
     if (this.useBbsHttp && this.bbsUrl) {
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         const url = `${this.bbsUrl}/entries/${encodeURIComponent(targetKey)}`;
 
@@ -238,7 +237,6 @@ class CloudService {
       } catch (error) {
         console.error('❌ All BBS HTTP retrieve attempts failed:', error.message);
         throw error;
-      }
       }
     }
 
@@ -312,16 +310,14 @@ class CloudService {
     const maxRetries = (this.config.azure && this.config.azure.retryAttempts) || 3;
 
     if (this.useBbsHttp && this.bbsUrl) {
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
+      try {
           const url = `${this.bbsUrl}/config/coordinates`;
-          console.log(`📡 [BBS HTTP] Fetching coordinates from: ${url}`);
-          
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
 
-          const response = await fetch(url, { signal: controller.signal });
-          clearTimeout(timeoutId);
+          const response = await NetworkUtils.httpRequest(url, {}, {
+            maxRetries,
+            timeoutMs: 10000,
+            retryDelayMs: attempt => Math.min(1000 * attempt, 10000)
+          });
           
           if (!response.ok) {
             console.warn(`⚠️ BBS HTTP coordinates fetch failed (Status: ${response.status})`);
@@ -337,16 +333,9 @@ class CloudService {
           console.log('📍 [BBS HTTP] Retrieved coordinates from cloud');
           return coordinates;
         } catch (error) {
-          console.error(`❌ BBS HTTP coordinates retrieve attempt ${attempt} failed:`, error.message);
-          
-          if (attempt < maxRetries) {
-            const delay = Math.min(1000 * attempt, 10000);
-            await this.sleep(delay);
-          } else {
-            console.error('❌ All BBS HTTP coordinates retrieve attempts failed');
-            return null; // Fallback to local if possible, but user wants centralized
-          }
-        }
+          console.error('❌ All BBS HTTP coordinates retrieve attempts failed:', error.message);
+          return null; // Fallback to local if possible, but user wants centralized
+      }
       }
     }
     return null;
