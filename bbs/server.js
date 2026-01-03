@@ -696,13 +696,16 @@ app.post('/devices/:deviceId/commands/:command', authenticateToken, async (req, 
     // Validate command
     const validCommands = ['play', 'pause', 'fullscreen', 'change-track', 'status', 'restart'];
     if (!validCommands.includes(command)) {
+      console.warn(`⚠️ Invalid IoT command requested: ${command} for ${deviceId}`);
       return res.status(400).json({ error: 'Invalid command' });
     }
+
+    console.log(`📡 Request to send IoT command: ${command} to ${deviceId} by ${email}`);
 
     // Send command via IoT Hub
     const commandResult = await iotHubService.sendCommandToDevice(deviceId, command, payload);
 
-    console.log(`📤 IoT command sent: ${command} to ${deviceId} by ${email}`);
+    console.log(`📤 IoT command sent successfully: ${command} to ${deviceId}, messageId: ${commandResult.messageId}`);
 
     return res.json({
       ok: true,
@@ -714,8 +717,12 @@ app.post('/devices/:deviceId/commands/:command', authenticateToken, async (req, 
     });
 
   } catch (err) {
-    console.error('POST /devices/:deviceId/commands/:command error:', err);
-    return res.status(500).json({ error: 'Failed to send IoT command', details: err.message });
+    console.error(`❌ POST /devices/${req.params.deviceId}/commands/${req.params.command} error:`, err);
+    return res.status(500).json({ 
+      error: 'Failed to send IoT command', 
+      details: err.message,
+      code: err.code || 'UNKNOWN_ERROR'
+    });
   }
 });
 

@@ -329,6 +329,33 @@
       <div id="statusMsg" class="status-msg"></div>
     </div>
 
+    <!-- IoT Controls Card -->
+    <div id="iotControlsContainer" class="card hidden">
+      <h3 style="margin-top:0; color:var(--primary-color); display:flex; justify-content:space-between; align-items:center;">
+        IoT Ohjaimet
+        <span id="iotStatusBadge" style="font-size:12px; padding:2px 8px; border-radius:10px; background:#eee; color:#666; font-weight:normal;">Ladataan...</span>
+      </h3>
+      
+      <!-- Not Registered State -->
+      <div id="iotNotRegistered" class="hidden" style="text-align:center; padding:10px 0;">
+        <p style="font-size:14px; color:var(--text-sub); margin-bottom:12px;">Laitetta ei ole rekisteröity IoT Hubiin.</p>
+        <button id="btnRegisterIoT" style="width:auto; padding:8px 16px;">Aktivoi IoT-ohjaus</button>
+      </div>
+
+      <!-- Control Buttons -->
+      <div id="iotButtons" class="hidden">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:12px;">
+          <button id="btnIotPlay" style="background-color:var(--primary-color); padding: 10px 5px;">▶️ Toista</button>
+          <button id="btnIotPause" style="background-color:var(--text-sub); padding: 10px 5px;">⏸️ Tauko</button>
+          <button id="btnIotFullscreen" style="background-color:var(--text-sub); padding: 10px 5px;">📺 Koko näyttö</button>
+          <button id="btnIotRestart" style="background-color:#d13438; padding: 10px 5px;">🔄 Restart Pi</button>
+        </div>
+        <button id="btnIotStatus" class="link-btn" style="text-align:left; padding:4px 0; margin:0;">Päivitä laitteen tila</button>
+      </div>
+
+      <div id="iotStatusMsg" class="status-msg" style="font-size:12px; margin-top:8px;"></div>
+    </div>
+
     <div class="history-section">
       <div class="history-header">
         <h3>Viimeisimmät</h3>

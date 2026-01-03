@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 const { IotHubClient } = require('@azure/arm-iothub');
-const { Registry, Client: IoTHubServiceClient } = require('azure-iothub');
+const { Registry, Client: IoTHubServiceClient, AmqpWs } = require('azure-iothub');
+const { Message } = require('azure-iot-common');
 
 /**
  * IoT Hub Service for device registration and management
@@ -16,6 +17,7 @@ class IoTHubService {
     this.registry = null;
     this.serviceClient = null;
     this.mockMode = false;
+    this.isInitialized = false;
   }
 
   async initialize() {
@@ -26,18 +28,21 @@ class IoTHubService {
     }
 
     try {
+      console.log(`🔄 Initializing IoT Hub Service for ${this.iotHubName}...`);
+      
       // 1. Initialize Management Client
       this.armClient = new IotHubClient(this.credentials, this.subscriptionId);
-      console.log('✅ ARM Client initialized');
-
+      
       // 2. Bootstrap: Get IoT Hub Connection String using Managed Identity
       const connectionString = await this._getHubConnectionString();
+      console.log('✅ Connection string retrieved from ARM');
       
       // 3. Initialize Data Plane Clients
       this.registry = Registry.fromConnectionString(connectionString);
-      this.serviceClient = IoTHubServiceClient.fromConnectionString(connectionString);
+      this.serviceClient = IoTHubServiceClient.fromConnectionString(connectionString, AmqpWs);
       
-      console.log('✅ IoT Hub Registry and Service clients initialized');
+      this.isInitialized = true;
+      console.log('✅ IoT Hub Registry and Service clients ready');
     } catch (error) {
       console.error('❌ Failed to initialize IoT Hub clients:', error.message);
       console.warn('⚠️ Falling back to mock mode');
@@ -111,18 +116,44 @@ class IoTHubService {
       return { messageId: `mock-${Date.now()}` };
     }
 
-    const { Message } = require('azure-iothub');
-    const messageData = JSON.stringify({ command, payload, timestamp: new Date().toISOString() });
-    const message = new Message(messageData);
-    message.ack = 'full';
-    message.messageId = `${command}-${Date.now()}`;
+    try {
+      console.log(`📤 Preparing to send command "${command}" to device ${deviceId}`);
+      
+      if (!this.isInitialized || !this.serviceClient) {
+        throw new Error('IoT Hub Service Client not initialized. Check if ARM credentials/permissions are correct.');
+      }
 
-    return new Promise((resolve, reject) => {
-      this.serviceClient.send(deviceId, message, (err, res) => {
-        if (err) reject(err);
-        else resolve({ messageId: message.messageId, result: res });
+      const messageData = JSON.stringify({ 
+        command, 
+        payload, 
+        timestamp: new Date().toISOString()
       });
-    });
+      
+      // Use Buffer to ensure correct AMQP encoding by rhea
+      const message = new Message(Buffer.from(messageData, 'utf8'));
+
+      return new Promise((resolve, reject) => {
+        // Set a 15 second timeout for the Azure call
+        const timeout = setTimeout(() => {
+          console.error(`⏱️ Timeout sending command to ${deviceId} after 15s`);
+          reject(new Error('IoT Hub send operation timed out'));
+        }, 15000);
+
+        this.serviceClient.send(deviceId, message, (err, res) => {
+          clearTimeout(timeout);
+          if (err) {
+            console.error(`❌ IoT Hub send error for ${deviceId}:`, err);
+            reject(err);
+          } else {
+            console.log(`✅ IoT Hub send successful for ${deviceId}`);
+            resolve({ messageId: message.messageId, result: res });
+          }
+        });
+      });
+    } catch (error) {
+      console.error(`❌ Failed to create or send IoT command:`, error.message);
+      throw error;
+    }
   }
 
   async getDevice(deviceId) {
