@@ -26,6 +26,8 @@
   },
   "dependencies": {
     "@azure/data-tables": "^13.3.0",
+    "azure-iot-device": "^1.18.3",
+    "azure-iot-device-mqtt": "^1.16.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",

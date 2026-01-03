@@ -243,9 +243,56 @@ The application polls the **ESPA TV BBS** (Bulletin Board Service) for stream up
 | GET | `/recovery` | Recovery mode diagnostics |
 | POST | `/recovery/restart` | Manual restart |
 
+## IoT Hub Cloud-to-Device Commands
+
+The Raspberry Pi now supports near real-time commands via Azure IoT Hub, in addition to the existing HTTP API and legacy WebSocket support.
+
+### IoT Hub Setup
+
+1. **Register Device**: The Raspberry Pi automatically registers with IoT Hub through the BBS service during startup
+2. **Connection**: Uses MQTT protocol for reliable, low-latency communication
+3. **Authentication**: SAS token-based authentication with automatic token refresh
+
+### Supported Commands
+
+| Command | Description | Parameters |
+|---------|-------------|------------|
+| `play` | Start video playback | None |
+| `pause` | Pause video playback | None |
+| `fullscreen` | Toggle fullscreen mode | None |
+| `change-track` | Change to specific track | `{ trackId: "track-123" }` |
+| `status` | Get device status | None |
+| `restart` | Restart the device | None |
+
+### Command Flow
+
+```
+BBS Web UI → IoT Hub → Raspberry Pi → Player Control → Response
+     ↓              ↓             ↓             ↓           ↓
+   HTTP API    Cloud-to-Device   MQTT Message   Puppeteer   Telemetry
+```
+
+### Testing Commands
+
+**Via HTTP API (existing):**
+```bash
+curl -X POST http://raspberry-pi:3000/control/play
+```
+
+**Via IoT Hub (new):**
+```bash
+# Register device first
+curl -X POST https://espa-tv-app.azurewebsites.net/devices/{deviceId}/register-iot \
+  -H "Authorization: Bearer {token}"
+
+# Send command via BBS
+curl -X POST https://espa-tv-app.azurewebsites.net/devices/{deviceId}/commands/play \
+  -H "Authorization: Bearer {token}"
+```
+
 ### Legacy WebSocket Events (Socket.IO)
 
-> **Note**: These are for backward compatibility with legacy cloud services. Azure Table Storage is recommended for new deployments.
+> **Note**: These are for backward compatibility with legacy cloud services. Azure IoT Hub is recommended for new deployments.
 
 #### Client to Server
 - `play` - Start playback

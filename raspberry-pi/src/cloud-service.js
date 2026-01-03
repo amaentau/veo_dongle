@@ -318,12 +318,12 @@ class CloudService {
             timeoutMs: 10000,
             retryDelayMs: attempt => Math.min(1000 * attempt, 10000)
           });
-          
+
           if (!response.ok) {
             console.warn(`⚠️ BBS HTTP coordinates fetch failed (Status: ${response.status})`);
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
           }
-          
+
           const coordinates = await response.json();
           if (!coordinates || typeof coordinates !== 'object' || Object.keys(coordinates).length === 0) {
             console.warn('⚠️ BBS HTTP returned empty or invalid coordinates');
@@ -338,6 +338,121 @@ class CloudService {
         }
     }
     return null;
+  }
+
+  /**
+   * Retrieve device authentication token from BBS
+   */
+  async getDeviceAuthToken() {
+    if (!this.useBbsHttp || !this.bbsUrl) {
+      console.log('⚠️ BBS HTTP not configured, cannot retrieve device auth token');
+      return null;
+    }
+
+    const maxRetries = (this.config.azure && this.config.azure.retryAttempts) || 3;
+
+    try {
+      // Use device ID to request authentication token
+      // This is a bootstrap authentication - the BBS will generate a secure token
+      const url = `${this.bbsUrl}/devices/${encodeURIComponent(this.deviceId)}/auth-token`;
+
+      const response = await NetworkUtils.httpRequest(url, {}, {
+        maxRetries,
+        timeoutMs: 10000,
+        retryDelayMs: attempt => Math.min(1000 * attempt, 10000)
+      });
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          console.log(`ℹ️ Device ${this.deviceId} not registered yet`);
+          return null;
+        }
+        console.warn(`⚠️ Device auth token fetch failed (Status: ${response.status})`);
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const tokenData = await response.json();
+      if (!tokenData.deviceToken) {
+        console.warn('⚠️ BBS returned empty device auth token');
+        return null;
+      }
+
+      console.log('🔑 Retrieved device authentication token from BBS');
+      return tokenData.deviceToken;
+
+    } catch (error) {
+      console.error('❌ Failed to retrieve device auth token:', error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Retrieve IoT Hub connection string from BBS
+   */
+  async getIoTHubConnectionString() {
+    if (!this.useBbsHttp || !this.bbsUrl) {
+      console.log('⚠️ BBS HTTP not configured, cannot retrieve IoT Hub connection string');
+      return null;
+    }
+
+    const maxRetries = (this.config.azure && this.config.azure.retryAttempts) || 3;
+
+    try {
+      // First, get the device authentication token from BBS
+      const deviceToken = await this.getDeviceAuthToken();
+
+      if (!deviceToken) {
+        console.log('⚠️ No device authentication token available');
+        return null;
+      }
+
+      const url = `${this.bbsUrl}/devices/${encodeURIComponent(this.deviceId)}/iot-connection?token=${encodeURIComponent(deviceToken)}`;
+
+      const response = await NetworkUtils.httpRequest(url, {}, {
+        maxRetries,
+        timeoutMs: 10000,
+        retryDelayMs: attempt => Math.min(1000 * attempt, 10000)
+      });
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          console.log(`ℹ️ Device ${this.deviceId} not registered with IoT Hub yet`);
+          return null;
+        }
+        console.warn(`⚠️ IoT Hub connection string fetch failed (Status: ${response.status})`);
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const connectionData = await response.json();
+
+      // Handle both old format (connectionString) and new format (hubName + sasToken)
+      if (connectionData.connectionString) {
+        // Backward compatibility: full connection string
+        console.log('🔗 Retrieved IoT Hub connection string from BBS (legacy format)');
+        return {
+          connectionString: connectionData.connectionString,
+          status: connectionData.iotHubStatus,
+          registeredAt: connectionData.registeredAt
+        };
+      } else if (connectionData.hubName && connectionData.sasToken) {
+        // New secure format: SAS token
+        console.log('🔗 Retrieved IoT Hub SAS token from BBS (secure format)');
+        return {
+          hubName: connectionData.hubName,
+          sasToken: connectionData.sasToken,
+          expiresIn: connectionData.expiresIn,
+          status: connectionData.iotHubStatus,
+          registeredAt: connectionData.registeredAt
+        };
+      } else {
+        console.warn('⚠️ BBS returned invalid IoT Hub credentials format');
+        return null;
+      }
+
+    } catch (error) {
+      console.error('❌ Failed to retrieve IoT Hub connection string:', error.message);
+      return null;
+    }
   }
 
   /**
