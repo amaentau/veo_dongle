@@ -9,6 +9,12 @@
   },
   "dependencies": {
     "@azure/data-tables": "^13.3.0",
+    "@azure/arm-iothub": "^6.2.0",
+    "@azure/identity": "^4.5.0",
+    "azure-iothub": "^1.16.2",
+    "azure-iot-device": "^1.18.2",
+    "azure-iot-device-mqtt": "^1.16.3",
+    "azure-iot-common": "^1.12.2",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",

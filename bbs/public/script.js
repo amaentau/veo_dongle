@@ -25,7 +25,10 @@
     adminModal: $('adminModal'),
     claimModal: $('claimModal'),
     shareModal: $('shareModal'),
-    renameModal: $('renameModal')
+    renameModal: $('renameModal'),
+    iotControls: $('iotControlsContainer'),
+    iotNotRegistered: $('iotNotRegistered'),
+    iotButtons: $('iotButtons')
   };
 
   const inputs = {
@@ -55,7 +58,9 @@
     emptyState: $('emptyState'),
     adminControls: $('adminControls'),
     adminForm: $('adminConfigForm'),
-    adminStatus: $('adminStatus')
+    adminStatus: $('adminStatus'),
+    iotStatusBadge: $('iotStatusBadge'),
+    iotStatusMsg: $('iotStatusMsg')
   };
 
   // --- AUTH FLOW ---
@@ -351,6 +356,9 @@
       
       const data = await res.json();
       renderHistory(data);
+      
+      // Load IoT Status
+      loadIotStatus();
     } catch (err) {
       console.error(err);
     } finally {
@@ -747,6 +755,142 @@
       status.className = 'status-msg error';
     }
   });
+
+
+  // --- IOT LOGIC ---
+  async function loadIotStatus() {
+    const deviceId = inputs.deviceSelect.value;
+    if (!deviceId) {
+      views.iotControls.classList.add('hidden');
+      return;
+    }
+
+    const badge = displays.iotStatusBadge;
+    const msg = displays.iotStatusMsg;
+    const controls = views.iotControls;
+    const notReg = views.iotNotRegistered;
+    const buttons = views.iotButtons;
+
+    badge.textContent = 'Ladataan...';
+    badge.style.background = '#eee';
+    badge.style.color = '#666';
+    msg.textContent = '';
+    
+    controls.classList.remove('hidden');
+
+    try {
+      const res = await fetch(`${baseUrl}/devices/${encodeURIComponent(deviceId)}/iot-status`, {
+        headers: { 'Authorization': `Bearer ${authState.token}` }
+      });
+      
+      if (res.status === 404) {
+        badge.textContent = 'Ei rekisteröity';
+        notReg.classList.remove('hidden');
+        buttons.classList.add('hidden');
+        return;
+      }
+
+      if (!res.ok) throw new Error();
+
+      const status = await res.json();
+      
+      notReg.classList.add('hidden');
+      buttons.classList.remove('hidden');
+
+      if (status.connectionState === 'Connected') {
+        badge.textContent = 'Online';
+        badge.style.background = '#d4edda';
+        badge.style.color = '#155724';
+      } else {
+        badge.textContent = 'Offline';
+        badge.style.background = '#f8d7da';
+        badge.style.color = '#721c24';
+      }
+      
+      if (status.mock) {
+        badge.textContent += ' (MOCK)';
+      }
+    } catch (err) {
+      badge.textContent = 'Virhe';
+      badge.style.background = '#f8d7da';
+      badge.style.color = '#721c24';
+      notReg.classList.add('hidden');
+      buttons.classList.add('hidden');
+    }
+  }
+
+  async function sendIotCommand(command, payload = {}) {
+    const deviceId = inputs.deviceSelect.value;
+    if (!deviceId) return;
+
+    const msg = displays.iotStatusMsg;
+    msg.textContent = 'Lähetetään...';
+    msg.className = 'status-msg';
+
+    try {
+      const res = await fetch(`${baseUrl}/devices/${encodeURIComponent(deviceId)}/commands/${command}`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authState.token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Virhe');
+
+      msg.textContent = `Komento "${command}" lähetetty!`;
+      msg.className = 'status-msg success';
+      setTimeout(() => { if (msg.className.includes('success')) msg.textContent = ''; }, 3000);
+    } catch (err) {
+      msg.textContent = `Virhe: ${err.message}`;
+      msg.className = 'status-msg error';
+    }
+  }
+
+  async function registerIot() {
+    const deviceId = inputs.deviceSelect.value;
+    if (!deviceId) return;
+
+    const btn = $('btnRegisterIoT');
+    const msg = displays.iotStatusMsg;
+
+    btn.disabled = true;
+    msg.textContent = 'Rekisteröidään laitetta IoT Hubiin...';
+    msg.className = 'status-msg info';
+
+    try {
+      const res = await fetch(`${baseUrl}/devices/${encodeURIComponent(deviceId)}/register-iot`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${authState.token}` }
+      });
+      
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Rekisteröinti epäonnistui');
+
+      msg.textContent = 'Laite rekisteröity onnistuneesti!';
+      msg.className = 'status-msg success';
+      await loadIotStatus();
+    } catch (err) {
+      msg.textContent = err.message;
+      msg.className = 'status-msg error';
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // IoT Event Listeners
+  $('btnRegisterIoT').addEventListener('click', registerIot);
+  $('btnIotPlay').addEventListener('click', () => sendIotCommand('play'));
+  $('btnIotPause').addEventListener('click', () => sendIotCommand('pause'));
+  $('btnIotFullscreen').addEventListener('click', () => sendIotCommand('fullscreen'));
+  $('btnIotRestart').addEventListener('click', () => {
+    if (confirm('Haluatko varmasti käynnistää laitteen uudelleen?')) {
+      sendIotCommand('restart');
+    }
+  });
+  $('btnIotStatus').addEventListener('click', loadIotStatus);
 
 
   // Helpers

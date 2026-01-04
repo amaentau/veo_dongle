@@ -12,6 +12,7 @@ const CloudService = require('./cloud-service');
 const NetworkUtils = require('./network-utils');
 const HDMIMonitor = require('./hdmi-monitor');
 const ProvisioningStateManager = require('./provisioning-state');
+const IoTDeviceService = require('./iot-device-service');
 require('dotenv').config();
 
 class EspaTvPlayer {
@@ -65,6 +66,9 @@ class EspaTvPlayer {
     // Initialize cloud service
     this.cloudService = new CloudService(this.config, this.deviceId);
     this.cloudCoordinates = null;
+
+    // Initialize IoT Hub device service
+    this.iotService = null; // Will be initialized when connection string is available
   }
 
   /**
@@ -835,6 +839,9 @@ ID: ${id}
           console.log('⚠️ No coordinates found in cloud, falling back to local config');
           this.cloudCoordinates = this.config.coordinates;
         }
+
+        // Initialize IoT Hub connection if available
+        await this.initializeIoTHubConnection();
       }
 
       if (!this.streamUrl) {
@@ -2350,7 +2357,69 @@ ID: ${id}
     }
   }
 
-  
+  /**
+   * Pause stream playback
+   */
+  async pauseStream() {
+    console.log('⏸️ Attempting to pause stream playback...');
+
+    try {
+      if (await this.isLoginPage()) {
+        console.log('🔐 On login page; not attempting to pause');
+        return;
+      }
+
+      // Check if video is currently playing
+      const isPlaying = await this.isVideoPlaying();
+      if (!isPlaying) {
+        console.log('ℹ️ Video is not currently playing - nothing to pause');
+        return;
+      }
+
+      // Click pause button (same coordinates as play button)
+      console.log('🎬 Clicking pause button...');
+      await this.clickControl('pause', 'play'); // Using same coordinates as play button
+
+      // Verify playback paused
+      await this.sleep(1000);
+      const stillPlaying = await this.isVideoPlaying();
+      if (!stillPlaying) {
+        console.log('✅ Playback successfully paused');
+      } else {
+        console.log('⚠️ Pause click completed but video may still be playing');
+      }
+
+    } catch (error) {
+      console.error('❌ Error pausing playback:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Toggle fullscreen mode
+   */
+  async toggleFullscreen() {
+    console.log('🔄 Toggling fullscreen mode...');
+
+    try {
+      if (await this.isLoginPage()) {
+        console.log('🔐 On login page; not attempting fullscreen toggle');
+        return;
+      }
+
+      // Click fullscreen button
+      console.log('🎬 Clicking fullscreen button...');
+      await this.clickControl('fullscreen', 'fullscreen');
+
+      console.log('✅ Fullscreen toggle requested');
+
+    } catch (error) {
+      console.error('❌ Error toggling fullscreen:', error.message);
+      throw error;
+    }
+  }
+
+
 
   async start() {
     try {
@@ -2362,12 +2431,119 @@ ID: ${id}
     }
   }
 
+  /**
+   * Initialize IoT Hub connection for cloud-to-device commands
+   */
+  async initializeIoTHubConnection() {
+    try {
+      console.log('🔗 Checking for IoT Hub connection...');
+
+      // Get IoT Hub connection string from BBS
+      const iotConnection = await this.cloudService.getIoTHubConnectionString();
+
+      if (!iotConnection) {
+        console.log('ℹ️ No IoT Hub connection available - commands will work via HTTP API only');
+        return;
+      }
+
+      console.log('🎯 IoT Hub connection found, initializing device client...');
+
+      // Create IoT Device Service with appropriate credentials
+      if (iotConnection.connectionString) {
+        // Backward compatibility: full connection string
+        this.iotService = new IoTDeviceService(this.deviceId, null, null, iotConnection.connectionString);
+      } else {
+        // New secure method: SAS token
+        this.iotService = new IoTDeviceService(this.deviceId, iotConnection.hubName, iotConnection.sasToken);
+      }
+
+      // Set up command handler
+      this.iotService.onCommand(this.handleIoTCommand.bind(this));
+
+      // Connect to IoT Hub
+      const connected = await this.iotService.connect();
+
+      if (connected) {
+        console.log('✅ IoT Hub command channel ready');
+      } else {
+        console.log('⚠️ IoT Hub connection failed - commands via HTTP API still available');
+      }
+
+    } catch (error) {
+      console.error('❌ IoT Hub initialization failed:', error.message);
+      console.log('ℹ️ Continuing without IoT Hub - HTTP API commands still available');
+    }
+  }
+
+  /**
+   * Handle IoT Hub commands
+   */
+  async handleIoTCommand(command, payload) {
+    console.log(`🎮 Executing IoT command: ${command}`, payload || '');
+
+    try {
+      switch (command) {
+        case 'play':
+          await this.playStream();
+          return { success: true, message: 'Playback started' };
+
+        case 'pause':
+          await this.pauseStream();
+          return { success: true, message: 'Playback paused' };
+
+        case 'fullscreen':
+          await this.toggleFullscreen();
+          return { success: true, message: 'Fullscreen toggled' };
+
+        case 'change-track':
+          // Implementation depends on Veo player API
+          if (payload && payload.trackId) {
+            console.log(`🎵 Changing to track: ${payload.trackId}`);
+            // Add track changing logic here when available
+            return { success: true, message: `Track change requested: ${payload.trackId}` };
+          } else {
+            return { success: false, error: 'Track ID required' };
+          }
+
+        case 'status':
+          const status = {
+            deviceId: this.deviceId,
+            streamUrl: this.streamUrl,
+            playerReady: await this.isPlayerReady(),
+            provisioningMode: this.provisioningDecision && this.provisioningDecision.needsProvisioning,
+            iotConnected: this.iotService && this.iotService.isConnected
+          };
+          return { success: true, status };
+
+        case 'restart':
+          console.log('🔄 IoT command: restart requested');
+          setTimeout(() => {
+            process.exit(0); // Graceful restart via process manager
+          }, 1000);
+          return { success: true, message: 'Restarting device' };
+
+        default:
+          console.log(`⚠️ Unknown IoT command: ${command}`);
+          return { success: false, error: `Unknown command: ${command}` };
+      }
+
+    } catch (error) {
+      console.error(`❌ IoT command ${command} failed:`, error.message);
+      return { success: false, error: error.message };
+    }
+  }
+
   async stop() {
     console.log('Stopping Espa-TV Player...');
 
     // Stop cloud service polling
     if (this.cloudService) {
       this.cloudService.cleanup();
+    }
+
+    // Stop IoT Hub service
+    if (this.iotService) {
+      await this.iotService.disconnect();
     }
 
     // Close browser
