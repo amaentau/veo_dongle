@@ -125,7 +125,7 @@ class ConnectivityManager {
   }
 
   /**
-   * Wait for internet connectivity with detailed diagnostics
+   * Wait for internet connectivity with detailed diagnostics and multi-stage recovery
    */
   async waitForInternet(updateSplash, timeoutMs = 300000, startIntervalMs = 3000) {
     const startTime = Date.now();
@@ -160,19 +160,38 @@ class ConnectivityManager {
 
       failCount++;
 
-      // Gathering diagnostics
+      // Stage 1: Gather diagnostics
       if ((failCount === 3 && !basicConnectivityEstablished) || (failCount === 2 && basicConnectivityEstablished)) {
         this.logNetworkDiagnostics();
       }
 
-      // Network recovery attempts
+      // Stage  stage 2: Attempt recoveries
       if (!basicConnectivityEstablished && !recoveryInProgress) {
+        // Recovery 1: Reapply (gentle)
         if (failCount === 6) {
           recoveryInProgress = true;
-          console.log('🔄 Attempting WiFi recovery for basic connectivity...');
+          console.log('🔄 Recovery Stage 1: Attempting WiFi reapply...');
           exec('sudo nmcli device reapply wlan0 2>/dev/null', (err) => {
             recoveryInProgress = false;
             if (!err) console.log('✅ WiFi reapply successful');
+          });
+        }
+        // Recovery 2: Connection Up
+        else if (failCount === 12) {
+          recoveryInProgress = true;
+          console.log('🔄 Recovery Stage 2: Attempting manual connection up...');
+          exec('sudo nmcli connection up "$(nmcli -t -f NAME,TYPE connection show --active | grep wifi | head -1 | cut -d: -f1)" 2>/dev/null', (err) => {
+            recoveryInProgress = false;
+            if (!err) console.log('✅ WiFi connection up attempted');
+          });
+        }
+        // Recovery 3: NM Reload (last resort)
+        else if (failCount === 18) {
+          recoveryInProgress = true;
+          console.log('🔄 Recovery Stage 3: Reloading NetworkManager...');
+          exec('sudo nmcli general reload 2>/dev/null', (err) => {
+            recoveryInProgress = false;
+            if (!err) console.log('✅ NetworkManager reload attempted');
           });
         }
       }
@@ -180,6 +199,7 @@ class ConnectivityManager {
       const remaining = Math.round((timeoutMs - (Date.now() - startTime)) / 1000);
       console.log(`⏳ Network check failed, retrying in ${currentInterval/1000}s (${remaining}s remaining)...`);
       await new Promise(r => setTimeout(r, currentInterval));
+      
       if (failCount > 4 && !basicConnectivityEstablished) {
         currentInterval = Math.min(currentInterval * 1.2, 6000);
       }
@@ -195,6 +215,9 @@ class ConnectivityManager {
     });
     exec('iwconfig wlan0 2>/dev/null || iwconfig 2>/dev/null | head -5', (err, stdout) => {
       if (!err && stdout) console.log(`📶 WiFi status: ${stdout.trim().replace(/\n/g, ' | ')}`);
+    });
+    exec('nmcli -t -f SSID,SIGNAL dev wifi | head -3', (err, stdout) => {
+      if (!err && stdout) console.log(`📊 WiFi signal scan: ${stdout.trim().replace(/\n/g, ' | ')}`);
     });
   }
 
@@ -252,4 +275,3 @@ class ConnectivityManager {
 }
 
 module.exports = ConnectivityManager;
-

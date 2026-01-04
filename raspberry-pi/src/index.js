@@ -14,10 +14,21 @@ const ConnectivityManager = require('./connectivity-manager');
 const PlayerController = require('./player-controller');
 require('dotenv').config();
 
+const PlayerState = {
+  BOOTING: 'BOOTING',
+  PROVISIONING: 'PROVISIONING',
+  CONNECTING: 'CONNECTING',
+  READY: 'READY',
+  PLAYING: 'PLAYING',
+  ERROR: 'ERROR'
+};
+
 class EspaTvPlayer {
   constructor() {
     this.app = express();
     this.server = http.createServer(this.app);
+    
+    this._state = PlayerState.BOOTING;
     
     // Config and Identity
     this.config = this.loadJsonConfig('config.json');
@@ -34,7 +45,12 @@ class EspaTvPlayer {
     this.iotService = null;
 
     this.streamUrl = null;
-    this.isProvisioning = false;
+  }
+
+  get state() { return this._state; }
+  set state(newState) {
+    console.log(`🔄 State Transition: ${this._state} → ${newState}`);
+    this._state = newState;
   }
 
   loadJsonConfig(filename) {
@@ -66,9 +82,15 @@ class EspaTvPlayer {
     this.app.use(express.json());
     this.app.use(express.static(path.join(__dirname, 'public')));
 
-    this.app.get('/health', (req, res) => res.json({ status: 'ok', deviceId: this.deviceId }));
+    this.app.get('/health', (req, res) => res.json({ 
+      status: 'ok', 
+      state: this.state,
+      deviceId: this.deviceId 
+    }));
+    
     this.app.get('/diagnostics', async (req, res) => {
       res.json({
+        state: this.state,
         hdmi: await this.hdmiMonitor.getDiagnostics(),
         provisioning: this.stateManager.getState(),
         deviceId: this.deviceId,
@@ -78,46 +100,56 @@ class EspaTvPlayer {
   }
 
   async initialize() {
-    console.log(`🚀 Initializing Espa-TV Player (ID: ${this.deviceId})`);
-    
-    // 1. Provisioning Check
-    const hdmiStatus = await this.hdmiMonitor.checkHDMI();
-    const needsProvisioning = !this.config.azure?.bbsUrl || !this.credentials.email || !hdmiStatus.connected;
+    try {
+      console.log(`🚀 Initializing Espa-TV Player (ID: ${this.deviceId})`);
+      
+      // 1. Provisioning Check
+      const hdmiStatus = await this.hdmiMonitor.checkHDMI();
+      const needsProvisioning = !this.config.azure?.bbsUrl || !this.credentials.email || !hdmiStatus.connected;
 
-    this.setupServer();
-    this.server.listen(this.port, () => console.log(`🔌 Server active on port ${this.port}`));
+      this.setupServer();
+      this.server.listen(this.port, () => console.log(`🔌 Server active on port ${this.port}`));
 
-    if (needsProvisioning && process.env.IGNORE_PROVISIONING !== 'true') {
-      return this.startProvisioning('Initial setup or missing HDMI');
-    }
+      if (needsProvisioning && process.env.IGNORE_PROVISIONING !== 'true') {
+        this.state = PlayerState.PROVISIONING;
+        return this.startProvisioning('Initial setup or missing HDMI');
+      }
 
-    // 2. Start Player (Splash Screen)
-    await this.player.launchBrowser();
-    await this.player.page.goto(`http://127.0.0.1:${this.port}/splash.html`);
+      // 2. Start Player (Splash Screen)
+      await this.player.launchBrowser();
+      await this.player.page.goto(`http://127.0.0.1:${this.port}/splash.html`);
 
-    // 3. Connectivity & Cloud Sync
-    const online = await this.connectivity.waitForInternet(msg => this.updateSplash(msg));
-    if (!online) {
-      console.error('❌ Failed to establish internet connection.');
-      return;
-    }
+      // 3. Connectivity & Cloud Sync
+      this.state = PlayerState.CONNECTING;
+      const online = await this.connectivity.waitForInternet(msg => this.updateSplash(msg));
+      if (!online) {
+        this.state = PlayerState.ERROR;
+        console.error('❌ Failed to establish internet connection.');
+        return;
+      }
 
-    await this.connectivity.announceToCloud(msg => this.updateSplash(msg));
-    await this.cloudService.initialize();
-    
+      await this.connectivity.announceToCloud(msg => this.updateSplash(msg));
+      await this.cloudService.initialize();
+      
     const bbsKey = process.env.BBS_KEY || this.deviceId;
     this.streamUrl = await this.connectivity.fetchBbsStreamUrlOnce(bbsKey);
     this.player.cloudCoordinates = await this.cloudService.getCoordinates();
 
-    // 4. IoT Hub Handshake
+    // 4. Set Ready State before IoT Handshake
+    this.state = PlayerState.READY;
     await this.initializeIoTHub();
 
     // 5. Start Playback
     if (this.streamUrl) {
       await this.player.goToStream(this.streamUrl);
+      this.state = PlayerState.PLAYING;
     } else {
       console.warn('⚠️ No stream URL found. Waiting for commands.');
       await this.updateSplash('Odotetaan lähetystä...');
+    }
+    } catch (error) {
+      this.state = PlayerState.ERROR;
+      throw error;
     }
   }
 
@@ -131,13 +163,41 @@ class EspaTvPlayer {
   }
 
   async handleIoTCommand(command, payload) {
-    console.log(`🎮 IoT Command: ${command}`);
-    switch (command) {
-      case 'play': await this.player.playStream(); return { success: true };
-      case 'pause': await this.player.pauseStream(); return { success: true };
-      case 'fullscreen': await this.player.enterFullscreen(); return { success: true };
-      case 'restart': setTimeout(() => process.exit(0), 1000); return { success: true };
-      default: return { success: false, error: 'Unknown command' };
+    console.log(`🎮 IoT Command Received: ${command} (State: ${this.state})`);
+
+    // Gate commands based on state
+    if (this.state === PlayerState.BOOTING || this.state === PlayerState.CONNECTING) {
+      return { success: false, error: 'Device is still booting or connecting' };
+    }
+    
+    if (this.state === PlayerState.PROVISIONING) {
+      return { success: false, error: 'Device is in provisioning mode' };
+    }
+
+    try {
+      switch (command) {
+        case 'play': 
+          await this.player.playStream(); 
+          this.state = PlayerState.PLAYING;
+          return { success: true };
+        case 'pause': 
+          await this.player.pauseStream(); 
+          this.state = PlayerState.READY;
+          return { success: true };
+        case 'fullscreen': 
+          await this.player.enterFullscreen(); 
+          return { success: true };
+        case 'restart': 
+          setTimeout(() => process.exit(0), 1000); 
+          return { success: true, message: 'Device rebooting' };
+        case 'status':
+          return { success: true, state: this.state, streamUrl: this.streamUrl };
+        default: 
+          return { success: false, error: 'Unknown command' };
+      }
+    } catch (error) {
+      console.error(`❌ IoT command ${command} failed:`, error.message);
+      return { success: false, error: error.message };
     }
   }
 
