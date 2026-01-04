@@ -824,8 +824,12 @@
     if (!deviceId) return;
 
     const msg = displays.iotStatusMsg;
-    msg.textContent = 'Lähetetään...';
-    msg.className = 'status-msg';
+    const buttons = views.iotButtons.querySelectorAll('button');
+    
+    // Disable buttons and show loading state
+    buttons.forEach(btn => btn.disabled = true);
+    msg.textContent = 'Suoritetaan laitteella...';
+    msg.className = 'status-msg info';
 
     try {
       const res = await fetch(`${baseUrl}/devices/${encodeURIComponent(deviceId)}/commands/${command}`, {
@@ -840,12 +844,20 @@
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Virhe');
 
-      msg.textContent = `Komento "${command}" lähetetty!`;
-      msg.className = 'status-msg success';
-      setTimeout(() => { if (msg.className.includes('success')) msg.textContent = ''; }, 3000);
+      if (data.mode === 'direct') {
+        msg.textContent = `✅ Suoritettu välittömästi (Status: ${data.methodStatus})`;
+        msg.className = 'status-msg success';
+      } else {
+        msg.textContent = `📨 Komento jonossa (Laite offline tai hidas)`;
+        msg.className = 'status-msg info';
+      }
+      
+      setTimeout(() => { if (msg.className.includes('success')) msg.textContent = ''; }, 4000);
     } catch (err) {
-      msg.textContent = `Virhe: ${err.message}`;
+      msg.textContent = `❌ Virhe: ${err.message}`;
       msg.className = 'status-msg error';
+    } finally {
+      buttons.forEach(btn => btn.disabled = false);
     }
   }
 
