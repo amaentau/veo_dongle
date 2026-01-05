@@ -209,6 +209,62 @@
       padding: 6px;
       font-size: 14px;
     }
+
+    /* Scoreboard Toggle */
+    .toggle-btn {
+      transition: all 0.2s;
+      border: 2px solid transparent;
+    }
+    .toggle-btn.active {
+      background-color: var(--primary-color) !important;
+      border-color: var(--accent-color);
+      box-shadow: 0 0 0 2px var(--primary-color);
+    }
+    
+    /* Event Badges */
+    .badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: bold;
+      text-transform: uppercase;
+      margin-right: 4px;
+      color: white;
+    }
+    .badge-treenipeli { background-color: #6c757d; }
+    .badge-winterliiga { background-color: #007bff; }
+    .badge-futsal { background-color: #fd7e14; }
+    .badge-mcdonaldsliiga { background-color: #ffc107; color: black; }
+    
+    .score-edit-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 14px;
+      padding: 4px;
+      color: var(--text-sub);
+    }
+    .score-edit-btn:hover { color: var(--primary-color); }
+
+    /* Admin Tabs */
+    .tab-btn {
+      background: none;
+      border: none;
+      padding: 8px 16px;
+      cursor: pointer;
+      font-size: 14px;
+      color: var(--text-sub);
+      border-bottom: 2px solid transparent;
+      width: auto;
+      margin: 0;
+    }
+    .tab-btn.active {
+      color: var(--primary-color);
+      border-bottom-color: var(--primary-color);
+      font-weight: bold;
+    }
+    .admin-tab { padding: 10px 0; }
   </style>
   <script defer src="/script.js"></script>
   <script>
@@ -312,7 +368,45 @@
         <input id="videoUrl" type="url" placeholder="https://youtube.com/...">
       </div>
 
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+        <div class="form-group">
+          <label for="gameGroup">Peliryhmä</label>
+          <select id="gameGroup" style="width:100%; padding:12px; border-radius:4px; border:1px solid var(--border-color); font-size:16px;">
+            <option value="">Ladataan...</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="eventType">Tapahtuma</label>
+          <select id="eventType" style="width:100%; padding:12px; border-radius:4px; border:1px solid var(--border-color); font-size:16px;">
+            <option value="">Ladataan...</option>
+          </select>
+        </div>
+      </div>
+
       <div class="form-group">
+        <label for="opponent">Vastustaja</label>
+        <input id="opponent" type="text" placeholder="esim. Kirkkonummi">
+      </div>
+
+      <div class="form-group">
+        <label>Tulos & Paikka</label>
+        <div style="display:flex; flex-direction:column; gap:12px; padding:12px; background:#f5f5f5; border-radius:8px; border:1px solid var(--border-color);">
+          <div style="display:flex; justify-content:center; gap:8px;">
+            <button id="btnHome" class="toggle-btn active" style="width:auto; padding:6px 16px; margin:0; font-size:14px;">Koti</button>
+            <button id="btnAway" class="toggle-btn" style="width:auto; padding:6px 16px; margin:0; font-size:14px; background-color:var(--text-sub);">Vieras</button>
+          </div>
+          
+          <div style="display:flex; align-items:center; justify-content:center; gap:12px; font-weight:bold;">
+            <div id="teamLeftLabel" style="flex:1; text-align:right; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">EsPa</div>
+            <input id="scoreHome" type="number" placeholder="-" style="width:50px; text-align:center; padding:8px;">
+            <span>—</span>
+            <input id="scoreAway" type="number" placeholder="-" style="width:50px; text-align:center; padding:8px;">
+            <div id="teamRightLabel" style="flex:1; text-align:left; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Vastustaja</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group" style="display:none;">
         <label for="videoTitle">Otsikko <span style="font-weight:normal; color:var(--text-sub)">(Valinnainen)</span></label>
         <input id="videoTitle" type="text" placeholder="esim. Luontodokumentti">
       </div>
@@ -371,20 +465,51 @@
 
   <!-- ADMIN MODAL -->
   <div id="adminModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:100; justify-content:center; align-items:center;">
-    <div class="card" style="width:90%; max-width:500px; max-height:90vh; overflow-y:auto;">
-      <h2 style="margin-top:0; color:var(--primary-color);">Koordinaatit</h2>
-      <p style="font-size:13px; color:var(--text-sub);">Muokkaa Veo-soittimen klikkauskohtia eri resoluutioille.</p>
+    <div class="card" style="width:95%; max-width:600px; max-height:90vh; overflow-y:auto;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <h2 style="margin:0; color:var(--primary-color);">Järjestelmän hallinta</h2>
+        <button id="btnCloseAdmin" style="width:auto; margin:0; padding:4px 12px; background-color:var(--text-sub);">X</button>
+      </div>
+
+      <div style="display:flex; gap:10px; margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+        <button class="tab-btn active" data-tab="tabCoords">Koordinaatit</button>
+        <button class="tab-btn" data-tab="tabMetadata">Metadata</button>
+        <button class="tab-btn" data-tab="tabUsers">Käyttäjät</button>
+      </div>
       
-      <div id="adminConfigForm">
-        <!-- Will be populated by JS -->
+      <!-- Coordinates Tab -->
+      <div id="tabCoords" class="admin-tab">
+        <p style="font-size:13px; color:var(--text-sub);">Muokkaa Veo-soittimen klikkauskohtia eri resoluutioille.</p>
+        <div id="adminConfigForm"></div>
+        <button id="btnSaveAdmin" style="margin-top:10px;">Tallenna koordinaatit</button>
+      </div>
+
+      <!-- Metadata Tab -->
+      <div id="tabMetadata" class="admin-tab hidden">
+        <h3 style="font-size:16px; margin-bottom:10px;">Peliryhmät ja Tapahtumatyypit</h3>
+        
+        <div style="margin-bottom:20px;">
+          <label>Peliryhmät (pilkulla erotettuna)</label>
+          <textarea id="adminGameGroups" style="width:100%; height:60px; padding:8px; border-radius:4px; border:1px solid var(--border-color);"></textarea>
+        </div>
+
+        <div style="margin-bottom:20px;">
+          <label>Tapahtumatyypit (pilkulla erotettuna)</label>
+          <textarea id="adminEventTypes" style="width:100%; height:60px; padding:8px; border-radius:4px; border:1px solid var(--border-color);"></textarea>
+        </div>
+        
+        <button id="btnSaveMetadata">Tallenna metadata</button>
+      </div>
+
+      <!-- Users Tab -->
+      <div id="tabUsers" class="admin-tab hidden">
+        <h3 style="font-size:16px; margin-bottom:10px;">Käyttäjähallinta</h3>
+        <div id="adminUsersList" style="max-height:300px; overflow-y:auto; border:1px solid var(--border-color); border-radius:4px;">
+          <!-- Users injected here -->
+        </div>
       </div>
 
       <div class="status-msg" id="adminStatus"></div>
-      
-      <div style="display:flex; gap:12px; margin-top:20px;">
-        <button id="btnCloseAdmin" style="background-color:var(--text-sub);">Sulje</button>
-        <button id="btnSaveAdmin">Tallenna</button>
-      </div>
     </div>
   </div>
 

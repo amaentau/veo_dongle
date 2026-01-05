@@ -27,6 +27,15 @@ mockDb[TABLE_NAME_CONFIG].push({
   })
 });
 
+mockDb[TABLE_NAME_CONFIG].push({
+  partitionKey: 'global',
+  rowKey: 'metadata',
+  config: JSON.stringify({
+    gameGroups: ['K2', 'K2 K3', 'K4'],
+    eventTypes: ['Treenipeli', 'Winterliiga', 'Futsal', 'McDonalds liiga']
+  })
+});
+
 class MockTableClient {
   constructor(tableName) { this.tableName = tableName; }
   async createTable() { return true; }

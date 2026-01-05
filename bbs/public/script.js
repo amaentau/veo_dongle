@@ -11,7 +11,10 @@
     token: localStorage.getItem('espa_token'),
     userEmail: localStorage.getItem('espa_email'),
     isAdmin: localStorage.getItem('espa_is_admin') === 'true',
-    devices: []
+    userGroup: localStorage.getItem('espa_user_group'),
+    devices: [],
+    metadata: { gameGroups: [], eventTypes: [] },
+    isHome: true
   };
 
   // --- ELEMENTS ---
@@ -44,7 +47,12 @@
     claimDeviceId: $('claimDeviceId'),
     claimFriendlyName: $('claimFriendlyName'),
     shareEmail: $('shareEmailInput'),
-    renameFriendlyName: $('renameFriendlyName')
+    renameFriendlyName: $('renameFriendlyName'),
+    gameGroup: $('gameGroup'),
+    eventType: $('eventType'),
+    opponent: $('opponent'),
+    scoreHome: $('scoreHome'),
+    scoreAway: $('scoreAway')
   };
 
   const displays = {
@@ -60,7 +68,9 @@
     adminForm: $('adminConfigForm'),
     adminStatus: $('adminStatus'),
     iotStatusBadge: $('iotStatusBadge'),
-    iotStatusMsg: $('iotStatusMsg')
+    iotStatusMsg: $('iotStatusMsg'),
+    teamLeft: $('teamLeftLabel'),
+    teamRight: $('teamRightLabel')
   };
 
   // --- AUTH FLOW ---
@@ -92,8 +102,68 @@
       displays.adminControls.style.display = 'none';
     }
     
+    loadMetadata();
     loadDevices();
   }
+
+  async function loadMetadata() {
+    try {
+      const res = await fetch(`${baseUrl}/config/metadata`);
+      const data = await res.json();
+      authState.metadata = data;
+
+      // Populate selects
+      inputs.gameGroup.innerHTML = data.gameGroups.map(g => `<option value="${g}">${g}</option>`).join('');
+      inputs.eventType.innerHTML = data.eventTypes.map(e => `<option value="${e}">${e}</option>`).join('');
+
+      // Auto-select last group
+      const lastGroup = localStorage.getItem('espa_last_group');
+      if (lastGroup && data.gameGroups.includes(lastGroup)) {
+        inputs.gameGroup.value = lastGroup;
+      }
+
+      updateScoreboardLabels();
+    } catch (err) {
+      console.error('Failed to load metadata:', err);
+    }
+  }
+
+  function updateScoreboardLabels() {
+    const group = inputs.gameGroup.value || 'EsPa';
+    const opponent = inputs.opponent.value.trim() || 'Vastustaja';
+    
+    if (authState.isHome) {
+      displays.teamLeft.textContent = group;
+      displays.teamRight.textContent = opponent;
+    } else {
+      displays.teamLeft.textContent = opponent;
+      displays.teamRight.textContent = group;
+    }
+  }
+
+  $('btnHome').addEventListener('click', () => {
+    authState.isHome = true;
+    $('btnHome').classList.add('active');
+    $('btnAway').classList.remove('active');
+    $('btnHome').style.backgroundColor = '';
+    $('btnAway').style.backgroundColor = 'var(--text-sub)';
+    updateScoreboardLabels();
+  });
+
+  $('btnAway').addEventListener('click', () => {
+    authState.isHome = false;
+    $('btnAway').classList.add('active');
+    $('btnHome').classList.remove('active');
+    $('btnAway').style.backgroundColor = '';
+    $('btnHome').style.backgroundColor = 'var(--text-sub)';
+    updateScoreboardLabels();
+  });
+
+  inputs.gameGroup.addEventListener('change', () => {
+    updateScoreboardLabels();
+    localStorage.setItem('espa_last_group', inputs.gameGroup.value);
+  });
+  inputs.opponent.addEventListener('input', updateScoreboardLabels);
 
   function logout() {
     authState.token = null;
@@ -235,10 +305,13 @@
     authState.token = data.token;
     authState.userEmail = data.email;
     authState.isAdmin = data.isAdmin;
+    authState.userGroup = data.userGroup;
     
     localStorage.setItem('espa_token', data.token);
     localStorage.setItem('espa_email', data.email);
     localStorage.setItem('espa_is_admin', data.isAdmin);
+    if (data.userGroup) localStorage.setItem('espa_user_group', data.userGroup);
+    else localStorage.removeItem('espa_user_group');
     
     switchToApp();
   }
@@ -374,24 +447,96 @@
     }
     items.forEach(item => {
       const url = item.value1;
-      const title = item.value2 || url;
       const timestamp = item.timestamp;
+      
+      const gameGroup = item.gameGroup || '';
+      const opponent = item.opponent || 'Vastustaja';
+      const eventType = item.eventType || '';
+      const isHome = item.isHome !== false;
+      const sHome = item.scoreHome === undefined ? null : item.scoreHome;
+      const sAway = item.scoreAway === undefined ? null : item.scoreAway;
+
+      const badgeClass = `badge-${(eventType || '').toLowerCase().replace(/\s+/g, '')}`;
+      const eventBadge = eventType ? `<span class="badge ${badgeClass}">${eventType}</span>` : '';
+
+      let scoreDisplay = '';
+      const hasScores = (sHome !== null && sAway !== null);
+      
+      if (isHome) {
+        scoreDisplay = `${gameGroup} <strong>${hasScores ? sHome + ' - ' + sAway : 'vs'}</strong> ${opponent}`;
+      } else {
+        scoreDisplay = `${opponent} <strong>${hasScores ? sHome + ' - ' + sAway : 'vs'}</strong> ${gameGroup}`;
+      }
+
+      const canEdit = authState.isAdmin || authState.userGroup === 'Veo Ylläpitäjä';
+
       const li = document.createElement('li');
       li.className = 'history-item';
       li.innerHTML = `
         <div class="item-header">
-          <span class="item-title">${escapeHtml(title)}</span>
+          <span class="item-title">
+            ${eventBadge}
+            ${scoreDisplay}
+          </span>
           <span class="item-time">${timeAgo(timestamp)}</span>
         </div>
-        <a href="${escapeHtml(url)}" target="_blank" class="item-url">${escapeHtml(url)}</a>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <a href="${escapeHtml(url)}" target="_blank" class="item-url">${escapeHtml(url)}</a>
+          ${canEdit ? `<button class="score-edit-btn" data-rowkey="${item.rowKey}" data-shome="${sHome}" data-saway="${sAway}" title="Muokkaa tulosta">✏️</button>` : ''}
+        </div>
       `;
       displays.historyList.appendChild(li);
     });
+
+    // Add score edit listeners
+    document.querySelectorAll('.score-edit-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        openScoreEdit(btn.dataset.rowkey, btn.dataset.shome, btn.dataset.saway);
+      });
+    });
+  }
+
+  function openScoreEdit(rowKey, sHome, sAway) {
+    const partitionKey = inputs.deviceSelect.value;
+    const currentSHome = (sHome === 'null' || sHome === null) ? '' : sHome;
+    const currentSAway = (sAway === 'null' || sAway === null) ? '' : sAway;
+    
+    const newSHome = prompt("Koti-tulos (jätä tyhjäksi jos ei tiedossa):", currentSHome);
+    if (newSHome === null) return;
+    const newSAway = prompt("Vieras-tulos (jätä tyhjäksi jos ei tiedossa):", currentSAway);
+    if (newSAway === null) return;
+
+    updateScore(partitionKey, rowKey, newSHome, newSAway);
+  }
+
+  async function updateScore(partitionKey, rowKey, scoreHome, scoreAway) {
+    try {
+      const res = await fetch(`${baseUrl}/entries/${encodeURIComponent(partitionKey)}/${encodeURIComponent(rowKey)}`, {
+        method: 'PATCH',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authState.token}`
+        },
+        body: JSON.stringify({ scoreHome, scoreAway })
+      });
+      if (!res.ok) throw new Error();
+      loadHistory();
+    } catch (err) {
+      alert('Tuloksen päivitys epäonnistui');
+    }
   }
 
   $('sendBtn').addEventListener('click', async () => {
     const videoUrl = inputs.videoUrl.value.trim();
-    const videoTitle = inputs.videoTitle.value.trim();
+    const gameGroup = inputs.gameGroup.value;
+    const eventType = inputs.eventType.value;
+    const opponent = inputs.opponent.value.trim();
+    const scoreHome = inputs.scoreHome.value;
+    const scoreAway = inputs.scoreAway.value;
+    const isHome = authState.isHome;
+
+    // Default title if not provided
+    const videoTitle = inputs.videoTitle.value.trim() || `${gameGroup} vs ${opponent || '???'}`;
 
     // Get all checked devices
     const targetCheckboxes = document.querySelectorAll('.device-target-checkbox:checked');
@@ -415,7 +560,17 @@
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${authState.token}`
           },
-          body: JSON.stringify({ key: deviceId, value1: videoUrl, value2: videoTitle })
+          body: JSON.stringify({ 
+            key: deviceId, 
+            value1: videoUrl, 
+            value2: videoTitle,
+            gameGroup,
+            eventType,
+            opponent,
+            isHome,
+            scoreHome,
+            scoreAway
+          })
         });
 
         if (res.status === 401 || res.status === 403) { logout(); return; }
@@ -431,8 +586,11 @@
     if (successCount > 0) {
       setAppStatus(`Lisätty onnistuneesti ${successCount} laitteelle!`, 'success');
       inputs.videoUrl.value = '';
-      inputs.videoTitle.value = '';
-      await loadHistory(); // Refresh history for the current context
+      inputs.opponent.value = '';
+      inputs.scoreHome.value = '';
+      inputs.scoreAway.value = '';
+      updateScoreboardLabels();
+      await loadHistory(); 
     }
 
     if (errors.length > 0) {
@@ -455,6 +613,20 @@
 
 
   // --- ADMIN LOGIC ---
+  
+  // Tab Switching
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.admin-tab').forEach(t => t.classList.add('hidden'));
+      btn.classList.add('active');
+      $(btn.dataset.tab).classList.remove('hidden');
+      
+      if (btn.dataset.tab === 'tabUsers') loadAdminUsers();
+      if (btn.dataset.tab === 'tabMetadata') loadAdminMetadata();
+    });
+  });
+
   $('btnOpenAdmin').addEventListener('click', async () => {
     views.adminModal.style.display = 'flex';
     displays.adminStatus.textContent = 'Ladataan...';
@@ -472,6 +644,104 @@
   $('btnCloseAdmin').addEventListener('click', () => {
     views.adminModal.style.display = 'none';
   });
+
+  // Metadata Management
+  async function loadAdminMetadata() {
+    try {
+      const res = await fetch(`${baseUrl}/config/metadata`);
+      const data = await res.json();
+      $('adminGameGroups').value = data.gameGroups.join(', ');
+      $('adminEventTypes').value = data.eventTypes.join(', ');
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  $('btnSaveMetadata').addEventListener('click', async () => {
+    const gameGroups = $('adminGameGroups').value.split(',').map(s => s.trim()).filter(Boolean);
+    const eventTypes = $('adminEventTypes').value.split(',').map(s => s.trim()).filter(Boolean);
+
+    displays.adminStatus.textContent = 'Tallennetaan...';
+    try {
+      const res = await fetch(`${baseUrl}/config/metadata`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authState.token}`
+        },
+        body: JSON.stringify({ gameGroups, eventTypes })
+      });
+      if (!res.ok) throw new Error();
+      displays.adminStatus.textContent = 'Metadata tallennettu!';
+      loadMetadata(); // Refresh app dropdowns
+    } catch (err) {
+      displays.adminStatus.textContent = 'Virhe tallennuksessa';
+    }
+  });
+
+  // User Management
+  async function loadAdminUsers() {
+    const list = $('adminUsersList');
+    list.innerHTML = '<div style="padding:20px; text-align:center;">Ladataan käyttäjiä...</div>';
+    
+    try {
+      const res = await fetch(`${baseUrl}/auth/users`, {
+        headers: { 'Authorization': `Bearer ${authState.token}` }
+      });
+      const users = await res.json();
+      
+      list.innerHTML = '';
+      users.forEach(u => {
+        const div = document.createElement('div');
+        div.style.cssText = 'padding:10px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;';
+        
+        const isSelf = u.email === authState.userEmail;
+        
+        div.innerHTML = `
+          <div style="font-size:13px;">
+            <strong>${escapeHtml(u.email)}</strong><br>
+            <span style="font-size:11px; color:#666;">${u.isAdmin ? 'Super Admin' : (u.userGroup || 'Ei ryhmää')}</span>
+          </div>
+          <div style="display:flex; gap:5px;">
+            <select class="user-group-select" data-email="${u.email}" style="font-size:12px; padding:2px;" ${isSelf ? 'disabled' : ''}>
+              <option value="" ${!u.userGroup && !u.isAdmin ? 'selected' : ''}>Ei ryhmää</option>
+              <option value="Veo Ylläpitäjä" ${u.userGroup === 'Veo Ylläpitäjä' ? 'selected' : ''}>Veo Ylläpitäjä</option>
+              <option value="ADMIN" ${u.isAdmin ? 'selected' : ''}>Super Admin</option>
+            </select>
+          </div>
+        `;
+        list.appendChild(div);
+      });
+
+      // Listen for changes
+      list.querySelectorAll('.user-group-select').forEach(select => {
+        select.addEventListener('change', async () => {
+          const email = select.dataset.email;
+          const val = select.value;
+          const isAdmin = val === 'ADMIN';
+          const userGroup = isAdmin ? 'Ylläpitäjä' : (val || null);
+          
+          try {
+            const res = await fetch(`${baseUrl}/auth/users/${encodeURIComponent(email)}`, {
+              method: 'PATCH',
+              headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authState.token}`
+              },
+              body: JSON.stringify({ userGroup, isAdmin })
+            });
+            if (!res.ok) throw new Error();
+            loadAdminUsers();
+          } catch (err) {
+            alert('Päivitys epäonnistui');
+          }
+        });
+      });
+
+    } catch (err) {
+      list.innerHTML = '<div style="padding:20px; color:red;">Virhe käyttäjien latauksessa.</div>';
+    }
+  }
 
   function renderAdminForm(config) {
     let html = '';

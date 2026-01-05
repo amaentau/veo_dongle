@@ -16,8 +16,15 @@ router.get('/:key', async (req, res) => {
     const results = [];
     for await (const entity of client.listEntities({ queryOptions: { filter } })) {
       results.push({
+        rowKey: entity.rowKey,
         value1: entity.value1,
         value2: entity.value2,
+        gameGroup: entity.gameGroup,
+        eventType: entity.eventType,
+        opponent: entity.opponent,
+        isHome: entity.isHome,
+        scoreHome: entity.scoreHome,
+        scoreAway: entity.scoreAway,
         timestamp: entity.timestamp
       });
       if (results.length >= 200) break; 
@@ -34,7 +41,18 @@ router.get('/:key', async (req, res) => {
 // POST /entry
 router.post('/', authenticateToken, async (req, res) => {
   try {
-    const { key, value1, value2 } = req.body || {};
+    const { 
+      key, 
+      value1, 
+      value2, 
+      gameGroup, 
+      eventType, 
+      opponent, 
+      isHome, 
+      scoreHome, 
+      scoreAway 
+    } = req.body || {};
+    
     if (!key || !value1) return res.status(400).json({ error: 'key and value1 required' });
 
     const hasAccess = await checkAndAutoProvision(req.user.email, key);
@@ -53,12 +71,46 @@ router.post('/', authenticateToken, async (req, res) => {
       timestamp,
       value1,
       value2: title,
+      gameGroup,
+      eventType,
+      opponent,
+      isHome: !!isHome,
+      scoreHome: (scoreHome === undefined || scoreHome === null || scoreHome === '') ? null : parseInt(scoreHome),
+      scoreAway: (scoreAway === undefined || scoreAway === null || scoreAway === '') ? null : parseInt(scoreAway),
       createdBy: req.user.email
     });
 
-    return res.status(201).json({ ok: true, timestamp });
+    return res.status(201).json({ ok: true, timestamp, rowKey });
   } catch (err) {
     console.error('POST /entry error:', err);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// PATCH /entry/:partitionKey/:rowKey (Update Score)
+router.patch('/:partitionKey/:rowKey', authenticateToken, async (req, res) => {
+  try {
+    const { partitionKey, rowKey } = req.params;
+    const { scoreHome, scoreAway } = req.body;
+
+    const canEdit = req.user.isAdmin || req.user.userGroup === 'Veo Ylläpitäjä';
+    if (!canEdit) {
+      return res.status(403).json({ error: 'Vain Veo Ylläpitäjä voi muokata tuloksia' });
+    }
+
+    const client = getTableClient(TABLE_NAME_ENTRIES);
+    const entity = await client.getEntity(partitionKey, rowKey);
+    
+    await client.updateEntity({
+      ...entity,
+      scoreHome: (scoreHome === undefined || scoreHome === null || scoreHome === '') ? null : parseInt(scoreHome),
+      scoreAway: (scoreAway === undefined || scoreAway === null || scoreAway === '') ? null : parseInt(scoreAway)
+    }, "Replace");
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('PATCH /entry error:', err);
+    if (err.statusCode === 404) return res.status(404).json({ error: 'Entry not found' });
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });

@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const { getTableClient, isFirstUser, TABLE_NAME_USERS } = require('../services/storage-service');
-const { JWT_SECRET } = require('../middleware/auth');
+const { JWT_SECRET, authenticateToken } = require('../middleware/auth');
 
 const BREVO_SMTP_KEY = process.env.BREVO_SMTP_KEY;
 const BREVO_SMTP_USER = process.env.BREVO_SMTP_USER;
@@ -144,8 +144,19 @@ router.post('/set-pin', async (req, res) => {
       lockedUntil: 0
     });
 
-    const token = jwt.sign({ email, isAdmin: makeAdmin }, JWT_SECRET, { expiresIn: '180d' });
-    return res.json({ ok: true, token, email, isAdmin: makeAdmin });
+    const token = jwt.sign({ 
+      email, 
+      isAdmin: makeAdmin,
+      userGroup: makeAdmin ? 'Ylläpitäjä' : null
+    }, JWT_SECRET, { expiresIn: '180d' });
+
+    return res.json({ 
+      ok: true, 
+      token, 
+      email, 
+      isAdmin: makeAdmin,
+      userGroup: makeAdmin ? 'Ylläpitäjä' : null
+    });
 
   } catch (err) {
     console.error('Set PIN error:', err);
@@ -189,13 +200,68 @@ router.post('/login', async (req, res) => {
       await client.updateEntity({ partitionKey: email, rowKey: 'profile', failedAttempts: 0, lockedUntil: 0 }, "Merge");
     }
 
-    const token = jwt.sign({ email, isAdmin: !!user.isAdmin }, JWT_SECRET, { expiresIn: '180d' });
-    return res.json({ ok: true, token, email, isAdmin: !!user.isAdmin });
+    const token = jwt.sign({ 
+      email, 
+      isAdmin: !!user.isAdmin,
+      userGroup: user.userGroup || (user.isAdmin ? 'Ylläpitäjä' : null)
+    }, JWT_SECRET, { expiresIn: '180d' });
+
+    return res.json({ 
+      ok: true, 
+      token, 
+      email, 
+      isAdmin: !!user.isAdmin,
+      userGroup: user.userGroup || (user.isAdmin ? 'Ylläpitäjä' : null)
+    });
 
   } catch (err) {
     if (err.statusCode === 404) return res.status(404).json({ error: 'User not found' });
     console.error('Login error:', err);
     return res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// 6. List Users (Admin Only)
+router.get('/users', authenticateToken, async (req, res) => {
+  if (!req.user.isAdmin) return res.sendStatus(403);
+  try {
+    const client = getTableClient(TABLE_NAME_USERS);
+    const users = [];
+    const iter = client.listEntities({ queryOptions: { filter: "RowKey eq 'profile'" } });
+    for await (const user of iter) {
+      users.push({
+        email: user.partitionKey,
+        isAdmin: !!user.isAdmin,
+        userGroup: user.userGroup || (user.isAdmin ? 'Ylläpitäjä' : null)
+      });
+    }
+    return res.json(users);
+  } catch (err) {
+    console.error('List users error:', err);
+    return res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+// 7. Update User Group (Admin Only)
+router.patch('/users/:email', authenticateToken, async (req, res) => {
+  if (!req.user.isAdmin) return res.sendStatus(403);
+  const { email } = req.params;
+  const { userGroup, isAdmin } = req.body;
+
+  try {
+    const client = getTableClient(TABLE_NAME_USERS);
+    const user = await client.getEntity(email, 'profile');
+    
+    await client.updateEntity({
+      ...user,
+      userGroup: userGroup || null,
+      isAdmin: typeof isAdmin === 'boolean' ? isAdmin : !!user.isAdmin
+    }, "Replace");
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('Update user error:', err);
+    return res.status(500).json({ error: 'Internal error' });
   }
 });
 
