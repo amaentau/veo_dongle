@@ -1,10 +1,11 @@
 <script>
   import { onMount } from 'svelte';
   import Header from './Header.svelte';
-  import DeviceSelector from './DeviceSelector.svelte';
-  import EntryForm from './EntryForm.svelte';
-  import IotControls from './IotControls.svelte';
-  import History from './History.svelte';
+  import MenuSpinner from './MenuSpinner.svelte';
+  import ProducerView from './ProducerView.svelte';
+  import EspaTvView from './EspaTvView.svelte';
+  import MusicView from './MusicView.svelte';
+  import SettingsView from './SettingsView.svelte';
   import AdminModal from './modals/AdminModal.svelte';
 
   let { authState, onLogout } = $props();
@@ -15,6 +16,7 @@
   let metadata = $state({ gameGroups: [], eventTypes: [] });
   let showAdminModal = $state(false);
   let historyRefreshTrigger = $state(0);
+  let activeView = $state('producer'); // Default to producer view for now
 
   async function loadMetadata() {
     try {
@@ -46,55 +48,61 @@
     loadDevices();
   });
 
-  $effect(() => {
-    if (selectedDeviceId) {
-      // Logic when selected device changes
-    }
-  });
-
   const refreshHistory = () => historyRefreshTrigger++;
+  const onDevicesChanged = () => loadDevices();
 </script>
 
-<div class="container fade-in">
+<div class="app-layout fade-in">
   <Header email={authState.userEmail} {onLogout} />
 
   {#if authState.isAdmin}
-    <div style="text-align:center; margin-bottom:16px;">
-      <button onclick={() => showAdminModal = true} style="width:auto; padding:8px 16px; font-size:14px; background-color:#605e5c;">
-        🔧 Järjestelmän asetukset
+    <div style="text-align:center; margin-bottom:8px;">
+      <button onclick={() => showAdminModal = true} class="admin-link-btn">
+        🔧 Hallinta
       </button>
     </div>
   {/if}
 
-  <div class="card">
-    <DeviceSelector 
-      {devices} 
-      bind:selectedDeviceId 
-      bind:targetDeviceIds 
-      token={authState.token}
-      onDevicesChanged={loadDevices}
-    />
+  <MenuSpinner 
+    bind:activeView 
+    isAdmin={authState.isAdmin} 
+    userGroup={authState.userGroup} 
+  />
 
-    <EntryForm 
-      {metadata} 
-      {targetDeviceIds} 
-      token={authState.token} 
-      onEntryAdded={refreshHistory}
-    />
+  <div class="view-content">
+    {#if activeView === 'producer'}
+      <ProducerView 
+        {authState} 
+        {onLogout} 
+        {devices} 
+        bind:selectedDeviceId 
+        bind:targetDeviceIds 
+        {metadata}
+        {onDevicesChanged}
+        {historyRefreshTrigger}
+        {refreshHistory}
+      />
+    {:else if activeView === 'settings'}
+      <SettingsView 
+        {authState} 
+        onLogout={onLogout} 
+        onOpenAdmin={() => showAdminModal = true}
+      />
+    {:else if activeView === 'tv'}
+      <EspaTvView 
+        {authState} 
+        {devices} 
+        bind:selectedDeviceId 
+        token={authState.token}
+      />
+    {:else if activeView === 'music'}
+      <MusicView 
+        {devices} 
+        bind:selectedDeviceId 
+        token={authState.token}
+      />
+    {/if}
   </div>
-
-  <IotControls 
-    deviceId={selectedDeviceId} 
-    token={authState.token} 
-  />
-
-  <History 
-    deviceId={selectedDeviceId} 
-    token={authState.token} 
-    isAdmin={authState.isAdmin}
-    userGroup={authState.userGroup}
-    refreshTrigger={historyRefreshTrigger}
-  />
 </div>
 
 {#if showAdminModal}
@@ -106,3 +114,33 @@
   />
 {/if}
 
+<style>
+  .app-layout {
+    width: 100%;
+    max-width: 480px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    padding-bottom: 40px;
+  }
+
+  .view-content {
+    padding: 0 20px;
+    flex: 1;
+  }
+
+  .admin-link-btn {
+    width: auto; 
+    padding: 4px 12px; 
+    font-size: 12px; 
+    background-color: transparent; 
+    color: var(--text-sub);
+    border: 1px solid var(--border-color);
+    margin: 0;
+  }
+  .admin-link-btn:hover {
+    background-color: #f0f0f0;
+    color: var(--primary-color);
+  }
+</style>
