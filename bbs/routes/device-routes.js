@@ -633,6 +633,7 @@ router.post('/announce', async (req, res) => {
 
 module.exports = {
   router,
+  iotHubService,
   checkAndAutoProvision
 };
 

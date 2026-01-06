@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getTableClient, TABLE_NAME_ENTRIES } = require('../services/storage-service');
 const { authenticateToken } = require('../middleware/auth');
-const { checkAndAutoProvision } = require('./device-routes');
+const { checkAndAutoProvision, iotHubService } = require('./device-routes');
 
 // GET /entries/:key
 router.get('/:key', async (req, res) => {
@@ -79,6 +79,15 @@ router.post('/', authenticateToken, async (req, res) => {
       scoreAway: (scoreAway === undefined || scoreAway === null || scoreAway === '') ? null : parseInt(scoreAway),
       createdBy: req.user.email
     });
+
+    // Notify the device via IoT Hub if it's an RPI
+    try {
+      console.log(`📡 Sending load_url command to device ${key}`);
+      await iotHubService.sendCommandToDevice(key, 'load_url', { url: value1 });
+    } catch (iotErr) {
+      console.warn(`⚠️ Could not notify device ${key} via IoT Hub:`, iotErr.message);
+      // We don't fail the request if IoT notification fails
+    }
 
     return res.status(201).json({ ok: true, timestamp, rowKey });
   } catch (err) {

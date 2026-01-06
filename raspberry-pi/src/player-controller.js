@@ -127,11 +127,26 @@ class PlayerController {
     const startTime = Date.now();
     console.log(`🎬 Going to stream: ${streamUrl} (Boot: ${isInitialBoot})`);
     
+    // Check if this is a direct media link (.mp3, .mp4, .png, etc.)
+    const isDirectMedia = /\.(mp3|mp4|wav|ogg|png|jpg|jpeg|gif|webp)|download=1|download\?/.test(streamUrl.toLowerCase());
+
     await this.page.goto(streamUrl, { 
-      waitUntil: isInitialBoot ? 'networkidle2' : 'domcontentloaded', 
+      waitUntil: isDirectMedia ? 'domcontentloaded' : (isInitialBoot ? 'networkidle2' : 'domcontentloaded'), 
       timeout: 45000 
     });
     
+    if (isDirectMedia) {
+      console.log('🎵 Direct media detected, skipping Veo automation');
+      // For audio/video files, ensure they start playing automatically if the browser didn't already
+      await this.page.evaluate(() => {
+        const media = document.querySelector('video, audio');
+        if (media) {
+          media.play().catch(e => console.log('Autoplay blocked or failed:', e.message));
+        }
+      });
+      return;
+    }
+
     let isLogin = false;
     for (let i = 0; i < (isInitialBoot ? 10 : 2); i++) {
       isLogin = await this.isLoginPage();

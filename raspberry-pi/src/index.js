@@ -190,6 +190,15 @@ class EspaTvPlayer {
         case 'restart': 
           setTimeout(() => process.exit(0), 1000); 
           return { success: true, message: 'Device rebooting' };
+        case 'load_url':
+          if (payload.url) {
+            console.log(`📡 IoT: Loading new URL: ${payload.url}`);
+            this.streamUrl = payload.url;
+            await this.player.goToStream(this.streamUrl, false); // Initial boot: false
+            this.state = PlayerState.PLAYING;
+            return { success: true };
+          }
+          return { success: false, error: 'No URL provided' };
         case 'status':
           return { success: true, state: this.state, streamUrl: this.streamUrl };
         default: 

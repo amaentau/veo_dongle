@@ -3,7 +3,7 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
-const { getTableClient, isFirstUser, TABLE_NAME_USERS } = require('../services/storage-service');
+const { getTableClient, isFirstUser, getNextUserId, TABLE_NAME_USERS } = require('../services/storage-service');
 const { JWT_SECRET, authenticateToken } = require('../middleware/auth');
 
 const BREVO_SMTP_KEY = process.env.BREVO_SMTP_KEY;
@@ -134,11 +134,13 @@ router.post('/set-pin', async (req, res) => {
 
     const client = getTableClient(TABLE_NAME_USERS);
     const makeAdmin = await isFirstUser();
+    const systemId = await getNextUserId();
 
     await client.upsertEntity({
       partitionKey: email,
       rowKey: 'profile',
       pinHash,
+      systemId,
       isAdmin: makeAdmin,
       failedAttempts: 0,
       lockedUntil: 0
@@ -146,6 +148,7 @@ router.post('/set-pin', async (req, res) => {
 
     const token = jwt.sign({ 
       email, 
+      systemId,
       isAdmin: makeAdmin,
       userGroup: makeAdmin ? 'Ylläpitäjä' : null
     }, JWT_SECRET, { expiresIn: '180d' });
@@ -154,6 +157,7 @@ router.post('/set-pin', async (req, res) => {
       ok: true, 
       token, 
       email, 
+      systemId,
       isAdmin: makeAdmin,
       userGroup: makeAdmin ? 'Ylläpitäjä' : null
     });
@@ -200,8 +204,16 @@ router.post('/login', async (req, res) => {
       await client.updateEntity({ partitionKey: email, rowKey: 'profile', failedAttempts: 0, lockedUntil: 0 }, "Merge");
     }
 
+    // Ensure user has a systemId (backfill for existing users)
+    let systemId = user.systemId;
+    if (!systemId) {
+      systemId = await getNextUserId();
+      await client.updateEntity({ partitionKey: email, rowKey: 'profile', systemId }, "Merge");
+    }
+
     const token = jwt.sign({ 
       email, 
+      systemId,
       isAdmin: !!user.isAdmin,
       userGroup: user.userGroup || (user.isAdmin ? 'Ylläpitäjä' : null)
     }, JWT_SECRET, { expiresIn: '180d' });
@@ -210,6 +222,7 @@ router.post('/login', async (req, res) => {
       ok: true, 
       token, 
       email, 
+      systemId,
       isAdmin: !!user.isAdmin,
       userGroup: user.userGroup || (user.isAdmin ? 'Ylläpitäjä' : null)
     });

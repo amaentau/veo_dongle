@@ -5,6 +5,7 @@ const TABLE_NAME_USERS = 'bbsUsers';
 const TABLE_NAME_CONFIG = 'bbsConfig';
 const TABLE_NAME_DEVICES = 'bbsDevices';
 const TABLE_NAME_PERMISSIONS = 'bbsPermissions';
+const TABLE_NAME_LIBRARY = 'bbsLibrary';
 const STORAGE_CONNECTION_STRING = process.env.STORAGE_CONNECTION_STRING;
 
 // --- MOCK STORAGE IMPLEMENTATION ---
@@ -13,7 +14,8 @@ const mockDb = {
   [TABLE_NAME_USERS]: [],
   [TABLE_NAME_CONFIG]: [],
   [TABLE_NAME_DEVICES]: [],
-  [TABLE_NAME_PERMISSIONS]: []
+  [TABLE_NAME_PERMISSIONS]: [],
+  [TABLE_NAME_LIBRARY]: []
 };
 
 // Default Config
@@ -30,7 +32,7 @@ mockDb[TABLE_NAME_CONFIG].push({
 mockDb[TABLE_NAME_CONFIG].push({
   partitionKey: 'global',
   rowKey: 'metadata',
-  config: JSON.stringify({
+    config: JSON.stringify({
     gameGroups: ['K2', 'K2 K3', 'K4'],
     eventTypes: ['Treenipeli', 'Winterliiga', 'Futsal', 'McDonalds liiga']
   })
@@ -96,7 +98,7 @@ function getTableClient(tableName) {
 }
 
 async function ensureTablesExist() {
-  const tables = [TABLE_NAME_ENTRIES, TABLE_NAME_USERS, TABLE_NAME_CONFIG, TABLE_NAME_DEVICES, TABLE_NAME_PERMISSIONS];
+  const tables = [TABLE_NAME_ENTRIES, TABLE_NAME_USERS, TABLE_NAME_CONFIG, TABLE_NAME_DEVICES, TABLE_NAME_PERMISSIONS, TABLE_NAME_LIBRARY];
   for (const t of tables) {
     try {
       const client = getTableClient(t);
@@ -114,6 +116,32 @@ async function isFirstUser() {
   return first.done; 
 }
 
+/**
+ * Gets the next available monotonic User ID
+ */
+async function getNextUserId() {
+  const client = getTableClient(TABLE_NAME_CONFIG);
+  const partitionKey = 'global';
+  const rowKey = 'user_counter';
+  
+  let currentId = 1000;
+  try {
+    const counter = await client.getEntity(partitionKey, rowKey);
+    currentId = parseInt(counter.value, 10);
+  } catch (err) {
+    if (err.statusCode !== 404) throw err;
+  }
+  
+  const nextId = currentId + 1;
+  await client.upsertEntity({
+    partitionKey,
+    rowKey,
+    value: nextId.toString()
+  });
+  
+  return nextId;
+}
+
 if (!STORAGE_CONNECTION_STRING) {
   console.warn('⚠️ No STORAGE_CONNECTION_STRING. Using In-Memory Mock Database.');
 } else {
@@ -123,10 +151,12 @@ if (!STORAGE_CONNECTION_STRING) {
 module.exports = {
   getTableClient,
   isFirstUser,
+  getNextUserId,
   TABLE_NAME_ENTRIES,
   TABLE_NAME_USERS,
   TABLE_NAME_CONFIG,
   TABLE_NAME_DEVICES,
-  TABLE_NAME_PERMISSIONS
+  TABLE_NAME_PERMISSIONS,
+  TABLE_NAME_LIBRARY
 };
 

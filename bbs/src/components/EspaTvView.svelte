@@ -8,13 +8,12 @@
   let error = $state('');
   let selectedStream = $state(null);
 
-  async function loadStreams() {
-    if (!selectedDeviceId) return;
+  async function loadLibrary() {
     loading = true;
     error = '';
     try {
-      // Reuse the existing entries endpoint to get the history for the selected device
-      const res = await fetch(`/entries/${encodeURIComponent(selectedDeviceId)}`, {
+      // Fetch from the global VEO library
+      const res = await fetch('/library/VEO', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (!res.ok) throw new Error('Striimejä ei voitu hakea');
@@ -26,11 +25,7 @@
     }
   }
 
-  onMount(loadStreams);
-
-  $effect(() => {
-    if (selectedDeviceId) loadStreams();
-  });
+  onMount(loadLibrary);
 
   async function playRemote(stream) {
     if (!selectedDeviceId) return;
@@ -43,14 +38,9 @@
         },
         body: JSON.stringify({ 
           key: selectedDeviceId, 
-          value1: stream.value1, 
-          value2: stream.value2,
-          gameGroup: stream.gameGroup,
-          eventType: stream.eventType,
-          opponent: stream.opponent,
-          isHome: stream.isHome,
-          scoreHome: stream.scoreHome,
-          scoreAway: stream.scoreAway
+          value1: stream.url, 
+          value2: stream.title,
+          ...stream.metadata
         })
       });
       if (!res.ok) throw new Error('Toisto epäonnistui');
@@ -61,39 +51,31 @@
   }
 
   function playLocal(stream) {
-    window.open(stream.value1, '_blank');
-  }
-
-  function formatTitle(stream) {
-    if (stream.isHome !== false) {
-      return `${stream.gameGroup || 'EsPa'} vs ${stream.opponent || '???'}`;
-    } else {
-      return `${stream.opponent || '???'} vs ${stream.gameGroup || 'EsPa'}`;
-    }
+    window.open(stream.url, '_blank');
   }
 </script>
 
 <div class="espatv-view fade-in">
-  <div class="card header-card">
-    <div class="form-group">
-      <label for="deviceSelect">Katseltava laite (Pi)</label>
-      <select id="deviceSelect" bind:value={selectedDeviceId}>
-        {#each devices as dev}
-          <option value={dev.id}>{dev.friendlyName || dev.id}</option>
-        {/each}
-      </select>
+  {#if devices && devices.length > 0}
+    <div class="card header-card">
+      <div class="form-group">
+        <label for="deviceSelect">Katseltava laite (Pi)</label>
+        <select id="deviceSelect" bind:value={selectedDeviceId}>
+          {#each devices as dev}
+            <option value={dev.id}>{dev.friendlyName || dev.id}</option>
+          {/each}
+        </select>
+      </div>
     </div>
-  </div>
+  {/if}
 
   <div class="streams-container">
-    <h3 style="margin-bottom: 16px; color: var(--primary-color);">Valitse Striimi</h3>
+    <h3 style="margin-bottom: 16px; color: var(--primary-color);">Kirjaston Striimit</h3>
     
     {#if loading}
       <div class="loader"></div>
     {:else if error}
       <div class="status-msg error">{error}</div>
-    {:else if streams.length === 0}
-      <div class="empty-state">Ei striimejä saatavilla.</div>
     {:else}
       <div class="stream-grid">
         {#each streams as stream}
@@ -102,11 +84,16 @@
             onclick={() => selectedStream = stream}
           >
             <div class="stream-info">
-              <span class="badge badge-{stream.eventType?.toLowerCase().replace(/\s+/g, '') || 'default'}">{stream.eventType || 'Video'}</span>
-              <div class="title">{formatTitle(stream)}</div>
-              <div class="date">{new Date(stream.timestamp).toLocaleDateString('fi-FI')}</div>
+              <span class="badge badge-{stream.metadata?.eventType?.toLowerCase().replace(/\s+/g, '') || 'default'}">{stream.metadata?.eventType || 'Video'}</span>
+              <div class="title">{stream.title}</div>
+              <div class="date">
+                {new Date(stream.timestamp).toLocaleDateString('fi-FI')} 
+                <span style="opacity: 0.6; font-weight: normal; margin-left: 8px;">Lähettäjä: {stream.creatorEmail}</span>
+              </div>
             </div>
           </button>
+        {:else}
+          <div class="empty-state">Kirjastossa ei ole vielä striimejä.</div>
         {/each}
       </div>
     {/if}
@@ -115,14 +102,16 @@
   {#if selectedStream}
     <div class="action-panel fade-in">
       <div class="card">
-        <h4>{formatTitle(selectedStream)}</h4>
+        <h4>{selectedStream.title}</h4>
         <div class="actions">
           <button class="action-btn local" onclick={() => playLocal(selectedStream)}>
             <span class="icon">📱</span> Katso tässä
           </button>
-          <button class="action-btn remote" onclick={() => playRemote(selectedStream)}>
-            <span class="icon">📺</span> Toista soittimella
-          </button>
+          {#if selectedDeviceId}
+            <button class="action-btn remote" onclick={() => playRemote(selectedStream)}>
+              <span class="icon">📺</span> Toista soittimella
+            </button>
+          {/if}
         </div>
       </div>
     </div>

@@ -17,18 +17,21 @@
     "vite": "^5.0.0"
   },
   "dependencies": {
-    "@azure/data-tables": "^13.3.0",
     "@azure/arm-iothub": "^6.2.0",
+    "@azure/data-tables": "^13.3.0",
     "@azure/identity": "^4.5.0",
-    "azure-iothub": "^1.16.2",
+    "@azure/storage-blob": "^12.26.0",
+    "@rollup/rollup-linux-x64-gnu": "^4.55.1",
+    "azure-iot-common": "^1.12.2",
     "azure-iot-device": "^1.18.2",
     "azure-iot-device-mqtt": "^1.16.3",
-    "azure-iot-common": "^1.12.2",
+    "azure-iothub": "^1.16.2",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.3",
+    "multer": "^1.4.5-lts.1",
     "nodemailer": "^7.0.11"
   },
   "engines": {
