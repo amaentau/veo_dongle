@@ -1,11 +1,14 @@
 <script>
   import { onMount } from 'svelte';
   import { deviceState, playMedia } from '../lib/deviceState.svelte.js';
+  import SocialSection from './SocialSection.svelte';
   
-  let { token } = $props();
+  let { token, authState } = $props();
 
   let tracks = $state([]);
   let loading = $state(false);
+  let showSocial = $state(false);
+  let socialTargetId = $state(null);
 
   async function loadLibrary() {
     loading = true;
@@ -44,6 +47,11 @@
       rowKey: track.rowKey
     }, forceLocal);
   }
+
+  function openSocial(track) {
+    socialTargetId = track.rowKey;
+    showSocial = true;
+  }
 </script>
 
 <div class="music-view fade-in">
@@ -61,6 +69,14 @@
               <span class="track-artist">Lähde: {track.creatorEmail}</span>
             </div>
             <div class="track-actions">
+              <button 
+                class="icon-btn social-btn" 
+                onclick={() => openSocial(track)} 
+                title="Kommentit ja reaktiot"
+              >
+                💬
+              </button>
+
               <button 
                 class="icon-btn local" 
                 onclick={() => handlePlay(track, true)} 
@@ -87,6 +103,16 @@
       </div>
     {/if}
   </div>
+
+  {#if showSocial}
+    <SocialSection 
+      targetId={socialTargetId} 
+      token={token} 
+      username={authState.username} 
+      userEmail={authState.userEmail}
+      onClose={() => showSocial = false} 
+    />
+  {/if}
 </div>
 
 <style>

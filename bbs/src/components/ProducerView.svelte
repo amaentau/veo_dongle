@@ -35,6 +35,7 @@
     token={authState.token} 
     isAdmin={authState.isAdmin}
     userGroup={authState.userGroup}
+    username={authState.username}
     refreshTrigger={historyRefreshTrigger}
   />
 </div>

@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { deviceState, playMedia } from '../lib/deviceState.svelte.js';
   import { isMediaCached, preCacheMedia, removeFromCache } from '../lib/cacheUtils.js';
+  import SocialSection from './SocialSection.svelte';
 
   let { authState, token } = $props();
 
@@ -10,6 +11,8 @@
   let error = $state('');
   let selectedStream = $state(null);
   let showLocalPlayer = $state(false);
+  let showSocial = $state(false);
+  let socialTargetId = $state(null);
   let cacheStatus = $state({}); // rowKey -> boolean
   let videoElement = $state(null);
 
@@ -116,6 +119,11 @@
     }
     showLocalPlayer = false;
   }
+
+  function openSocial(stream) {
+    socialTargetId = stream.rowKey;
+    showSocial = true;
+  }
 </script>
 
 <div class="highlights-view fade-in">
@@ -142,6 +150,14 @@
             </div>
             
             <div class="stream-actions">
+              <button 
+                class="icon-btn social-btn" 
+                onclick={(e) => { e.stopPropagation(); openSocial(stream); }} 
+                title="Kommentit ja reaktiot"
+              >
+                💬
+              </button>
+
               <button 
                 class="icon-btn cache {cacheStatus[stream.rowKey] ? 'cached' : ''}" 
                 onclick={() => toggleCache(stream)}
@@ -202,6 +218,16 @@
         </div>
       </div>
     </div>
+  {/if}
+
+  {#if showSocial}
+    <SocialSection 
+      targetId={socialTargetId} 
+      token={token} 
+      username={authState.username} 
+      userEmail={authState.userEmail}
+      onClose={() => showSocial = false} 
+    />
   {/if}
 </div>
 

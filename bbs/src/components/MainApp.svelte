@@ -94,6 +94,7 @@
       />
     {:else if activeView === 'music'}
       <MusicView 
+        {authState}
         token={authState.token}
       />
     {/if}
