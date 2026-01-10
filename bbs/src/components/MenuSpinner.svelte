@@ -61,13 +61,15 @@
         onclick={() => handleSelect(item)}
         title={item.label}
       >
-        <div class="img-wrapper">
+        <div class="img-container">
           <img 
             src={enabled ? item.img : item.imgBW} 
             alt={item.label} 
           />
+          {#if activeView === item.id}
+            <div class="selection-halo"></div>
+          {/if}
         </div>
-        <span class="label">{item.label}</span>
       </button>
     {/each}
   </div>
@@ -78,10 +80,10 @@
     width: 100%;
     overflow-x: auto;
     overflow-y: visible;
-    padding: 15px 0;
+    padding: 20px 0 30px 0;
     scrollbar-width: none; 
     -ms-overflow-style: none;
-    display: block; /* Use block instead of flex */
+    display: block;
     -webkit-overflow-scrolling: touch;
     scroll-snap-type: x mandatory;
   }
@@ -92,10 +94,10 @@
 
   .ribbon {
     display: flex;
-    gap: 20px;
-    padding: 0 20px; /* Reduced to 20px, combined with margin-left for scale */
+    gap: 16px; /* Increased gap */
+    padding: 0 40px;
     align-items: center;
-    width: max-content; /* Ensure it takes full width of content */
+    width: max-content;
     min-width: 100%;
   }
 
@@ -103,86 +105,79 @@
     background: none;
     border: none;
     padding: 0;
-    margin: 0 10px; /* Added horizontal margin to handle scale overflow */
+    margin: 0;
     cursor: pointer;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
-    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    width: 80px;
+    transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+    width: 132px; /* Increased 10% from 120px */
     flex-shrink: 0;
     outline: none;
     scroll-snap-align: center;
+    position: relative;
+    filter: drop-shadow(0 4px 6px rgba(0,0,0,0.05));
   }
 
-  .img-wrapper {
-    width: 60px;
-    height: 60px;
-    border-radius: 50%;
-    background: white;
-    box-shadow: var(--shadow);
+  .img-container {
+    width: 110px; /* Increased 10% from 100px */
+    height: 110px; /* Increased 10% from 100px */
     display: flex;
     align-items: center;
     justify-content: center;
-    overflow: hidden;
-    border: 2px solid transparent;
-    transition: all 0.3s ease;
+    position: relative;
+    transition: transform 0.4s ease;
   }
 
   .menu-item img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
-    transition: transform 0.3s ease;
+    object-fit: contain; /* Respect transparency and aspect ratio */
+    transition: all 0.4s ease;
   }
 
-  .label {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-sub);
-    opacity: 0.7;
-    white-space: nowrap;
-    transition: all 0.3s ease;
+  /* Selection Halo - The new "Flagship" alternative */
+  .selection-halo {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 140%;
+    height: 140%;
+    background: radial-gradient(circle, rgba(252, 227, 84, 0.25) 0%, rgba(21, 112, 57, 0.1) 40%, transparent 70%);
+    z-index: -1;
+    border-radius: 50%;
+    animation: aura-pulse 3s infinite ease-in-out;
+  }
+
+  @keyframes aura-pulse {
+    0% { transform: translate(-50%, -50%) scale(0.9); opacity: 0.5; }
+    50% { transform: translate(-50%, -50%) scale(1.1); opacity: 0.8; }
+    100% { transform: translate(-50%, -50%) scale(0.9); opacity: 0.5; }
   }
 
   /* Active State */
   .menu-item.active {
-    transform: scale(1.25);
+    transform: scale(1.3); /* Dramatic zoom to read text on image */
     z-index: 10;
+    filter: drop-shadow(0 12px 20px rgba(0,0,0,0.12));
   }
 
-  .menu-item.active .img-wrapper {
-    border-color: var(--primary-color);
-    box-shadow: 0 8px 20px rgba(21, 112, 57, 0.3);
-  }
-
-  .menu-item.active .label {
-    color: var(--primary-color);
-    opacity: 1;
-    transform: translateY(2px);
+  .menu-item.active img {
+    filter: brightness(1.05) saturate(1.1);
   }
 
   /* Disabled State */
   .menu-item.disabled {
     cursor: not-allowed;
-  }
-
-  .menu-item.disabled .img-wrapper {
-    background: #f0f0f0;
-    box-shadow: none;
-  }
-
-  .menu-item.disabled img {
-    filter: grayscale(1);
-    opacity: 0.6;
+    opacity: 0.4;
+    filter: grayscale(1) contrast(0.8);
   }
 
   /* Hover (Desktop only) */
   @media (hover: hover) {
-    .menu-item:not(.disabled):hover .img-wrapper {
-      transform: translateY(-5px);
-      box-shadow: 0 10px 15px rgba(0,0,0,0.1);
+    .menu-item:not(.disabled):hover {
+      transform: translateY(-8px) scale(1.1);
     }
   }
 </style>

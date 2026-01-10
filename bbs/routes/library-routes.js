@@ -11,19 +11,26 @@ const upload = multer({ storage: multer.memoryStorage() });
 router.get('/:type', authenticateToken, async (req, res) => {
   try {
     const { type } = req.params;
+    const { hubId } = req.query;
     const client = getTableClient(TABLE_NAME_LIBRARY);
-    const filter = `PartitionKey eq '${type.toUpperCase()}'`;
+    let filter = `PartitionKey eq '${type.toUpperCase()}'`;
     
     const results = [];
     for await (const entity of client.listEntities({ queryOptions: { filter } })) {
+      const metadata = entity.metadata ? JSON.parse(entity.metadata) : {};
+      
+      // Client-side filtering for hubId in metadata if provided
+      if (hubId && metadata.hubId !== hubId) continue;
+
       results.push({
         rowKey: entity.rowKey,
         type: entity.partitionKey,
         url: entity.url,
         title: entity.title,
-        metadata: entity.metadata ? JSON.parse(entity.metadata) : {},
+        metadata,
         creatorId: entity.creatorId,
         creatorEmail: entity.creatorEmail,
+        username: entity.username,
         timestamp: entity.timestamp
       });
     }
@@ -69,7 +76,7 @@ router.post('/blob/upload/:type', authenticateToken, upload.single('file'), asyn
 // 2. POST /library - Add new content to global library
 router.post('/', authenticateToken, async (req, res) => {
   try {
-    const { type, url, title, metadata } = req.body;
+    const { type, url, title, metadata, tags, hubId } = req.body;
     
     if (!type || !url || !title) {
       return res.status(400).json({ error: 'type, url, and title are required' });
@@ -79,14 +86,22 @@ router.post('/', authenticateToken, async (req, res) => {
     const timestamp = new Date().toISOString();
     const rowKey = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
+    // Enrichment: Handle tags and hubId
+    const finalMetadata = {
+      ...(metadata || {}),
+      tags: Array.isArray(tags) ? tags : [],
+      hubId: hubId || 'global'
+    };
+
     await client.createEntity({
       partitionKey: type.toUpperCase(),
       rowKey,
       url,
       title,
-      metadata: metadata ? JSON.stringify(metadata) : null,
+      metadata: JSON.stringify(finalMetadata),
       creatorId: req.user.systemId,
       creatorEmail: req.user.email,
+      username: req.user.username,
       timestamp
     });
 

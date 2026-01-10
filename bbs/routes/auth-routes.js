@@ -3,7 +3,13 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
-const { getTableClient, isFirstUser, getNextUserId, TABLE_NAME_USERS } = require('../services/storage-service');
+const { 
+  getTableClient, 
+  isFirstUser, 
+  getNextUserId, 
+  TABLE_NAME_USERS,
+  TABLE_NAME_USERNAMES 
+} = require('../services/storage-service');
 const { JWT_SECRET, authenticateToken } = require('../middleware/auth');
 
 const BREVO_SMTP_KEY = process.env.BREVO_SMTP_KEY;
@@ -119,20 +125,60 @@ router.post('/verify-otp', async (req, res) => {
   }
 });
 
+// 3.5 Check Username
+router.get('/check-username/:username', async (req, res) => {
+  const { username } = req.params;
+  if (!username || username.length < 3) return res.status(400).json({ error: 'Username too short' });
+
+  try {
+    const client = getTableClient(TABLE_NAME_USERNAMES);
+    await client.getEntity(username.toLowerCase(), 'index');
+    return res.json({ available: false });
+  } catch (err) {
+    if (err.statusCode === 404) return res.json({ available: true });
+    return res.status(500).json({ error: 'Internal error' });
+  }
+});
+
 // 4. Set PIN
 router.post('/set-pin', async (req, res) => {
-  const { pin, setupToken } = req.body;
-  if (!pin || !setupToken) return res.status(400).json({ error: 'Missing fields' });
+  const { pin, setupToken, username } = req.body;
+  if (!pin || !setupToken || !username) return res.status(400).json({ error: 'Missing fields' });
   if (!/^\d{4}$/.test(pin)) return res.status(400).json({ error: 'PIN must be 4 digits' });
+  if (username.length < 3) return res.status(400).json({ error: 'Username must be at least 3 chars' });
 
   try {
     const decoded = jwt.verify(setupToken, JWT_SECRET);
     if (decoded.purpose !== 'setup') return res.status(403).json({ error: 'Invalid token purpose' });
 
     const email = decoded.email;
-    const pinHash = await bcrypt.hash(pin, 10);
+    const lowerUsername = username.toLowerCase();
 
     const client = getTableClient(TABLE_NAME_USERS);
+    const nameClient = getTableClient(TABLE_NAME_USERNAMES);
+
+    // Try to reserve username
+    try {
+      await nameClient.createEntity({
+        partitionKey: lowerUsername,
+        rowKey: 'index',
+        email: email
+      });
+    } catch (err) {
+      // If mock client is used, it doesn't throw on duplicate in my current implementation 
+      // but Azure Table Storage would if using createEntity instead of upsert.
+      // Let's check manually for safety in mock or real.
+      try {
+        const existing = await nameClient.getEntity(lowerUsername, 'index');
+        if (existing.email !== email) {
+          return res.status(409).json({ error: 'Username already taken' });
+        }
+      } catch (e) {
+        if (e.statusCode !== 404) throw e;
+      }
+    }
+
+    const pinHash = await bcrypt.hash(pin, 10);
     const makeAdmin = await isFirstUser();
     const systemId = await getNextUserId();
 
@@ -141,6 +187,7 @@ router.post('/set-pin', async (req, res) => {
       rowKey: 'profile',
       pinHash,
       systemId,
+      username,
       isAdmin: makeAdmin,
       failedAttempts: 0,
       lockedUntil: 0
@@ -149,6 +196,7 @@ router.post('/set-pin', async (req, res) => {
     const token = jwt.sign({ 
       email, 
       systemId,
+      username,
       isAdmin: makeAdmin,
       userGroup: makeAdmin ? 'Ylläpitäjä' : null
     }, JWT_SECRET, { expiresIn: '180d' });
@@ -158,6 +206,7 @@ router.post('/set-pin', async (req, res) => {
       token, 
       email, 
       systemId,
+      username,
       isAdmin: makeAdmin,
       userGroup: makeAdmin ? 'Ylläpitäjä' : null
     });
@@ -214,6 +263,7 @@ router.post('/login', async (req, res) => {
     const token = jwt.sign({ 
       email, 
       systemId,
+      username: user.username,
       isAdmin: !!user.isAdmin,
       userGroup: user.userGroup || (user.isAdmin ? 'Ylläpitäjä' : null)
     }, JWT_SECRET, { expiresIn: '180d' });
@@ -223,6 +273,7 @@ router.post('/login', async (req, res) => {
       token, 
       email, 
       systemId,
+      username: user.username,
       isAdmin: !!user.isAdmin,
       userGroup: user.userGroup || (user.isAdmin ? 'Ylläpitäjä' : null)
     });
@@ -244,6 +295,7 @@ router.get('/users', authenticateToken, async (req, res) => {
     for await (const user of iter) {
       users.push({
         email: user.partitionKey,
+        username: user.username,
         isAdmin: !!user.isAdmin,
         userGroup: user.userGroup || (user.isAdmin ? 'Ylläpitäjä' : null)
       });

@@ -49,15 +49,11 @@
 </script>
 
 <div class="app-layout fade-in">
-  <Header email={authState.userEmail} {onLogout} />
-
-  {#if authState.isAdmin}
-    <div style="text-align:center; margin-bottom:8px;">
-      <button onclick={() => showAdminModal = true} class="admin-link-btn">
-        🔧 Hallinta
-      </button>
-    </div>
-  {/if}
+  <Header 
+    email={authState.userEmail} 
+    username={authState.username}
+    {onLogout} 
+  />
 
   <MenuSpinner 
     bind:activeView 
@@ -134,19 +130,5 @@
     flex: 1;
     width: 100%;
     min-width: 0; /* Prevent flex child from pushing width */
-  }
-
-  .admin-link-btn {
-    width: auto; 
-    padding: 4px 12px; 
-    font-size: 12px; 
-    background-color: transparent; 
-    color: var(--text-sub);
-    border: 1px solid var(--border-color);
-    margin: 0;
-  }
-  .admin-link-btn:hover {
-    background-color: #f0f0f0;
-    color: var(--primary-color);
   }
 </style>

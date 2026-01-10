@@ -4,6 +4,7 @@
   let email = $state('');
   let otp = $state('');
   let pin = $state('');
+  let username = $state('');
   let setupToken = $state(null);
   let currentStep = $state('lookup'); // lookup, otp, setPin, login
   let status = $state({ msg: '', type: '' });
@@ -77,13 +78,14 @@
   }
 
   async function handleSetPin() {
+    if (username.length < 3) return setStatus('Käyttäjänimen on oltava vähintään 3 merkkiä');
     if (pin.length !== 4) return setStatus('PIN-koodin on oltava 4 numeroa');
     loading = true;
     try {
       const res = await fetch('/auth/set-pin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin, setupToken })
+        body: JSON.stringify({ pin, setupToken, username })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -117,10 +119,41 @@
 </script>
 
 <div class="container fade-in">
-  <header>
-    <img src="/logo.png" alt="EsPa Logo" class="logo">
-    <h1>ESPA TV</h1>
+  <header class="auth-header">
+    <img src="/logo.png" alt="EsPa Logo" class="auth-logo">
+    <h1 class="brand-name">ESPA <span class="brand-accent">TV</span></h1>
   </header>
+
+<style>
+  .auth-header {
+    text-align: center;
+    margin-bottom: 32px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .auth-logo {
+    height: 100px;
+    width: auto;
+    object-fit: contain;
+  }
+
+  .brand-name {
+    font-size: 36px;
+    font-weight: 900;
+    letter-spacing: -1px;
+    color: var(--primary-color);
+    text-transform: uppercase;
+    margin: 0;
+  }
+
+  .brand-accent {
+    color: var(--accent-color);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  }
+</style>
 
   <div class="card">
     {#if currentStep === 'lookup'}
@@ -153,10 +186,14 @@
 
       {:else if currentStep === 'setPin'}
         <div class="form-group">
+          <label for="authUsername">Käyttäjänimi</label>
+          <input id="authUsername" type="text" bind:value={username} placeholder="nimimerkki" minlength="3">
+        </div>
+        <div class="form-group">
           <label for="authSetPin">Uusi PIN</label>
           <input id="authSetPin" type="password" class="pin-input" bind:value={pin} placeholder="****" maxlength="4">
         </div>
-        <button onclick={handleSetPin} disabled={loading}>Tallenna PIN</button>
+        <button onclick={handleSetPin} disabled={loading}>Tallenna ja kirjaudu</button>
 
       {:else if currentStep === 'login'}
         <div class="form-group">

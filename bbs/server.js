@@ -8,6 +8,8 @@ const deviceRoutes = require('./routes/device-routes').router;
 const configRoutes = require('./routes/config-routes');
 const entryRoutes = require('./routes/entry-routes');
 const libraryRoutes = require('./routes/library-routes');
+const socialRoutes = require('./routes/social-routes');
+const hubRoutes = require('./routes/hub-routes').router;
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -41,6 +43,8 @@ app.use('/config', configRoutes);
 app.use('/entries', entryRoutes); // For /entries/:key
 app.use('/entry', entryRoutes);   // For /entry (POST)
 app.use('/library', libraryRoutes);
+app.use('/social', socialRoutes);
+app.use('/hubs', hubRoutes);
 
 // Handle SPA routing - send all other requests to index.html
 app.get('*', (req, res) => {

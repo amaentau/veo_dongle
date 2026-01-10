@@ -2,20 +2,26 @@ const { TableClient } = require('@azure/data-tables');
 
 const TABLE_NAME_ENTRIES = process.env.TABLE_NAME || 'bbsEntries';
 const TABLE_NAME_USERS = 'bbsUsers';
+const TABLE_NAME_USERNAMES = 'bbsUsernames';
 const TABLE_NAME_CONFIG = 'bbsConfig';
 const TABLE_NAME_DEVICES = 'bbsDevices';
 const TABLE_NAME_PERMISSIONS = 'bbsPermissions';
+const TABLE_NAME_HUB_PERMISSIONS = 'bbsHubPermissions';
 const TABLE_NAME_LIBRARY = 'bbsLibrary';
+const TABLE_NAME_SOCIAL = 'bbsSocial';
 const STORAGE_CONNECTION_STRING = process.env.STORAGE_CONNECTION_STRING;
 
 // --- MOCK STORAGE IMPLEMENTATION ---
 const mockDb = {
   [TABLE_NAME_ENTRIES]: [],
   [TABLE_NAME_USERS]: [],
+  [TABLE_NAME_USERNAMES]: [],
   [TABLE_NAME_CONFIG]: [],
   [TABLE_NAME_DEVICES]: [],
   [TABLE_NAME_PERMISSIONS]: [],
-  [TABLE_NAME_LIBRARY]: []
+  [TABLE_NAME_HUB_PERMISSIONS]: [],
+  [TABLE_NAME_LIBRARY]: [],
+  [TABLE_NAME_SOCIAL]: []
 };
 
 // Default Config
@@ -98,7 +104,17 @@ function getTableClient(tableName) {
 }
 
 async function ensureTablesExist() {
-  const tables = [TABLE_NAME_ENTRIES, TABLE_NAME_USERS, TABLE_NAME_CONFIG, TABLE_NAME_DEVICES, TABLE_NAME_PERMISSIONS, TABLE_NAME_LIBRARY];
+  const tables = [
+    TABLE_NAME_ENTRIES, 
+    TABLE_NAME_USERS, 
+    TABLE_NAME_USERNAMES,
+    TABLE_NAME_CONFIG, 
+    TABLE_NAME_DEVICES, 
+    TABLE_NAME_PERMISSIONS, 
+    TABLE_NAME_HUB_PERMISSIONS,
+    TABLE_NAME_LIBRARY,
+    TABLE_NAME_SOCIAL
+  ];
   for (const t of tables) {
     try {
       const client = getTableClient(t);
@@ -154,9 +170,12 @@ module.exports = {
   getNextUserId,
   TABLE_NAME_ENTRIES,
   TABLE_NAME_USERS,
+  TABLE_NAME_USERNAMES,
   TABLE_NAME_CONFIG,
   TABLE_NAME_DEVICES,
   TABLE_NAME_PERMISSIONS,
-  TABLE_NAME_LIBRARY
+  TABLE_NAME_HUB_PERMISSIONS,
+  TABLE_NAME_LIBRARY,
+  TABLE_NAME_SOCIAL
 };
 
